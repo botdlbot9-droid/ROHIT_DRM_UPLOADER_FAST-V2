@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="[https://i.ibb.co/v6Vr7HCt/1000003297.png](https://i.ibb.co/bRDX5bH0/Gemini-Generated-Image-ivpotqivpotqivpo.png)" alt="ITsGOLU">
+  <img src="https://i.ibb.co/bRDX5bH0/Gemini-Generated-Image-ivpotqivpotqivpo.png" alt="ROHIT">
 </p>
 <h1 align="center">
   <a href="https://github.com/ITsGOLU-OFFICIAL/ITsGOLU_UPLOADER_FAST-V2">
