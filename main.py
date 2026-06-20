@@ -1274,36 +1274,6 @@ async def admin_commands_callback(client, callback_query: CallbackQuery):
             [InlineKeyboardButton("🔙 वापस", callback_data="back_to_start")]
         ])
     )
-# ================== RESTART NOTIFICATION ==================
-async def send_startup_notification():
-    try:
-        log_channel = db.get_log_channel(bot.me.username)
-        msg = (
-            f"✅ **Bot Restarted Successfully!**\n\n"
-            f"🔄 Redeploy/restart completed.\n"
-            f"⏰ `{datetime.now().strftime('%d-%m-%Y %I:%M:%S %p')}`\n"
-            f"🤖 Status: 🟢 Online"
-        )
-        if log_channel:
-            await bot.send_message(log_channel, msg)
-        else:
-            # Agar log channel nahi hai toh OWNER_ID par bhejo
-            await bot.send_message(OWNER_ID, msg)
-    except Exception as e:
-        print(f"Startup notification error: {e}")
 
-if __name__ == "__main__":
-    # Purane bot.run() ko comment karo
-    # bot.run()
-    
-    # Naya tareeka
-    async def start_bot():
-        await bot.start()
-        await send_startup_notification()  # <-- Notification yahan bhejega
-        await idle()
-        await bot.stop()
-    
-    import asyncio
-    asyncio.run(start_bot())
 print("Bot Started...")
 bot.run()
