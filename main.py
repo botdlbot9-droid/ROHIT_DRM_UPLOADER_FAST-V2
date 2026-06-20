@@ -1208,10 +1208,32 @@ async def back_to_start_callback(client, callback_query: CallbackQuery):
         media=InputMediaPhoto(
             media=photologo,
             caption=f"**Mʏ ᴄᴏᴍᴍᴀɴᴅꜱ ғᴏʀ ʏᴏᴜ [{callback_query.from_user.first_name} ](tg://settings)**\n\n{commands_list}"
+                    f"**# DRM_UPLOADER BOT**\n\n"
+                    f"**Yo {m.from_user.first_name} 😂**\n"
+                    f"This ain't a normal bot — this is your **DOWNLOAD FAST** 🎉\n\n"
+                    f"**WHAT I DROP FOR YOU**\n"
+                    f"• Crazy-fast videos (no buffering drama)\n"
+                    f"• Clean PDFs & docs — straight to the point\n"
+                    f"• Full batch dumps via .txt\n"
+                    f"• Pick your quality + custom thumbs\n\n"
+                    f"**WHERE I COOK**\n"
+                    f"• YouTube — no cookies, no stress\n"
+                    f"• ClassPlus — DRM? handled.\n"
+                    f"• Utkarsh — vids · PDFs · .ws\n"
+                    f"• Study IQ — locked or unlocked\n"
+                    f"• Khan Sir\n"
+                    f"• APPX — direct links only\n"
+                    f"• VIDCRYPT — protected stuff cracked\n"
+                    f"• Zoom recordings\n"
+                    f"• PW DRM — encrypted content unlocked\n"
+                    f"• SHE - DWALU (VID + PDF)\n"
+                    f"• Adda247 — S3 & streaming links\n\n"
+                    f"**Built for speed freaks & power users**\n"
+                    f"• Smooth · Clean · No backdoor"
         ),
         reply_markup=InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("𝐈𝐓'𝐬𝐆𝐎𝐋𝐔.™®", url="https://t.me/ITsGOLU_OWNER_BOT")
+                InlineKeyboardButton("𝐈𝐓 Rohit.™®", url="https://t.me/rohit46788")
             ],
             [
                 InlineKeyboardButton("ғᴇᴀᴛᴜʀᴇꜱ 🪔", callback_data="features"),
