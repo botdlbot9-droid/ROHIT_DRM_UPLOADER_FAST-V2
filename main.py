@@ -859,8 +859,8 @@ async def txt_handler(bot: Client, m: Message):
                 bcov = f'bcov_auth={cwtoken}'
                 url = url.split("bcov_auth")[0]+bcov
                            
-            elif "aad1d34p8vz63oiq" in url or "sec1.pw.live" in url:
-                url = f"https://anonymouspwplayerrrr-c95d81521328.herokuapp.com/pw?url={url}?token={raw_text4}"
+            elif ".mpd" in url or "pw.live" in url:
+                url = f"https://download.asmultiverse.com?Vurl={url}"
 
             if ".pdf*" in url:
                 url = f"https://dragoapi.vercel.app/pdf/{url}"
