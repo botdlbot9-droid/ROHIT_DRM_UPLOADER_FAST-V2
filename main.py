@@ -857,7 +857,7 @@ async def txt_handler(bot: Client, m: Message):
                 url, contentId = url.split('&contentHashIdl=', 1)
                 headers = {
                     'host': 'api.classplusapp.com',
-                    'x-access-token': f'{working_token}',    
+                    'x-access-token': f'{cptoken}',    
                     'accept-language': 'EN',
                     'api-version': '18',
                     'app-version': '1.4.73.2',
