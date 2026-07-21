@@ -853,7 +853,7 @@ async def txt_handler(bot: Client, m: Message):
                 url   = response.json()['url']
 
             elif "childId" in url and "parentId" in url:
-                url = f"https://anonymouspwplayerrrr-c95d81521328.herokuapp.com/pw?url={url}&token={raw_text4}"
+                url = f"https://anonymouspwplayeer-2038df9c1dbd.herokuapp.com/pw?url={url}&token={raw_text4}"
                         
             if "edge.api.brightcove.com" in url:
                 bcov = f'bcov_auth={cwtoken}'
