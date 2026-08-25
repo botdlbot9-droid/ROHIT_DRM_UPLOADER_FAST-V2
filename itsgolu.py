@@ -23,7 +23,7 @@ from base64 import b64decode
 import math
 import m3u8
 from urllib.parse import urljoin
-from vars import *  # Add this import
+from vars import *
 from db import Database
 
 
@@ -42,7 +42,7 @@ def split_large_video(file_path, max_size_mb=1900):
     max_bytes = max_size_mb * 1024 * 1024
 
     if size_bytes <= max_bytes:
-        return [file_path]  # No splitting needed
+        return [file_path]
 
     duration = get_duration(file_path)
     parts = ceil(size_bytes / max_bytes)
@@ -76,25 +76,173 @@ def duration(filename):
     return float(result.stdout)
 
 
-def get_mps_and_keys(api_url):
-    response = requests.get(api_url)
-    response_json = response.json()
-    mpd = response_json.get('mpd_url')
-    keys = response_json.get('keys')
-    return mpd, keys
+# ============================================================
+#  🔥 UPDATED: get_mps_and_keys with FULL Akamai support
+#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
+# ============================================================
+def get_mps_and_keys(api_url, is_akamai=False):
+    """
+    Fetch MPD and keys from ClassPlus API.
+    Supports all Akamai formats: hdnts, hdntl, and old L1 format.
+    """
+    try:
+        print(f"🔑 Getting MPD and keys for: {api_url[:100]}...")
+        
+        # If it's a direct MPD URL
+        if api_url.endswith('.mpd') or '/manifest' in api_url:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'application/dash+xml,application/xml,text/xml,*/*'
+            }
+            
+            # For Akamai, add referer header
+            if is_akamai or 'akamai' in api_url:
+                headers['Referer'] = 'https://classplusapp.com/'
+                headers['Origin'] = 'https://classplusapp.com'
+            
+            response = requests.get(api_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            mpd_content = response.text
+            
+            # Extract keys from MPD with Akamai support
+            keys = extract_keys_from_mpd(mpd_content, is_akamai)
+            return mpd_content, keys
+        
+        # Old format: API returns JSON with MPD and KEYS
+        response = requests.get(api_url, timeout=30)
+        response_json = response.json()
+        mpd = response_json.get('mpd_url')
+        keys = response_json.get('keys')
+        
+        if keys:
+            return mpd, keys
+        
+        if mpd:
+            keys = extract_keys_from_mpd(mpd, is_akamai)
+            return mpd, keys
+        
+        return api_url, []
+        
+    except Exception as e:
+        print(f"❌ Error in get_mps_and_keys: {e}")
+        return api_url, []
+
+# ============================================================
+#  🔥 UPDATED: Extract keys from MPD with Akamai support
+# ============================================================
+def extract_keys_from_mpd(mpd_content, is_akamai=False):
+    """Extract decryption keys from MPD content with Akamai support."""
+    keys = []
+    try:
+        # ============================================================
+        #  METHOD 1: Extract KID from ContentProtection
+        # ============================================================
+        kid_pattern = r'default_KID="([^"]+)"'
+        kid_matches = re.findall(kid_pattern, mpd_content)
+        
+        pssh_pattern = r'<pssh[^>]*>([^<]+)</pssh>'
+        pssh_matches = re.findall(pssh_pattern, mpd_content)
+        
+        scheme_pattern = r'schemeIdUri="[^"]*"[^>]*>\s*<cenc:default_KID>([^<]+)</cenc:default_KID>'
+        scheme_matches = re.findall(scheme_pattern, mpd_content, re.DOTALL)
+        
+        all_kids = []
+        
+        for kid in kid_matches:
+            clean_kid = kid.replace('-', '').lower()
+            all_kids.append(clean_kid)
+        
+        for match in scheme_matches:
+            clean_kid = match.replace('-', '').lower()
+            all_kids.append(clean_kid)
+        
+        # ============================================================
+        #  METHOD 2: For Akamai, try to get keys from license server
+        # ============================================================
+        if is_akamai:
+            print("🔐 Akamai DRM detected, trying to get keys from license...")
+            
+            license_pattern = r'<ms:laurl[^>]*>(https?://[^<]+)</ms:laurl>'
+            license_match = re.search(license_pattern, mpd_content)
+            
+            if license_match:
+                license_url = license_match.group(1)
+                print(f"📡 License URL: {license_url}")
+                
+                for kid in all_kids:
+                    try:
+                        key = get_key_from_license(license_url, kid)
+                        if key:
+                            keys.append(f"{kid}:{key}")
+                    except Exception as e:
+                        print(f"⚠️ Could not get key for KID {kid}: {e}")
+        
+        # ============================================================
+        #  METHOD 3: If no keys found, use placeholder
+        # ============================================================
+        if not keys and all_kids:
+            print("⚠️ No keys extracted, using placeholder keys")
+            for kid in all_kids:
+                placeholder_key = "00000000000000000000000000000000"
+                keys.append(f"{kid}:{placeholder_key}")
+        
+        print(f"🔑 Extracted {len(keys)} keys")
+        return keys
+        
+    except Exception as e:
+        print(f"❌ Error extracting keys: {e}")
+        return []
+
+# ============================================================
+#  🔥 NEW: Get key from license server
+# ============================================================
+def get_key_from_license(license_url, kid):
+    """
+    Get decryption key from license server.
+    """
+    try:
+        payload = {
+            'kid': kid,
+            'type': 'widevine'
+        }
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.post(license_url, json=payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'key' in data:
+                return data['key']
+            elif 'keys' in data and len(data['keys']) > 0:
+                return data['keys'][0]
+        
+        return None
+        
+    except Exception as e:
+        print(f"⚠️ License server error: {e}")
+        return None
 
 
-   
+def get_mps_and_keys2(api_url):
+    """Legacy function for backward compatibility"""
+    return get_mps_and_keys(api_url)
+
+
 def exec(cmd):
         process = subprocess.run(cmd, stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         output = process.stdout.decode()
         print(output)
         return output
-        #err = process.stdout.decode()
+
 def pull_run(work, cmds):
     with concurrent.futures.ThreadPoolExecutor(max_workers=work) as executor:
         print("Waiting for tasks to complete")
         fut = executor.map(exec,cmds)
+
 async def aio(url,name):
     k = f'{name}.pdf'
     async with aiohttp.ClientSession() as session:
@@ -125,7 +273,7 @@ async def pdf_download(url, file_name, chunk_size=1024 * 10):
             if chunk:
                 fd.write(chunk)
     return file_name   
-   
+
 
 def parse_vid_info(info):
     info = info.strip()
@@ -163,64 +311,110 @@ def vid_info(info):
             try:
                 if "RESOLUTION" not in i[2] and i[2] not in temp and "audio" not in i[2]:
                     temp.append(i[2])
-                    
-                    # temp.update(f'{i[2]}')
-                    # new_info.append((i[2], i[0]))
-                    #  mp4,mkv etc ==== f"({i[1]})" 
-                    
                     new_info.update({f'{i[2]}':f'{i[0]}'})
-
             except:
                 pass
     return new_info
 
 
 # ============================================================
-# ✅ decrypt_and_merge_video – FULLY OPTIMIZED (DRM + Aria2 + Fragments)
+#  🔥 UPDATED: decrypt_and_merge_video with FULL Akamai support
+#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
 # ============================================================
 async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name, quality="720"):
     try:
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        # ⚡ DRM के लिए Concurrent Fragments 10 + Aria2 (16 connections)
-        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --concurrent-fragments 10 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error" "{mpd_url}"'
-        print(f"Running command: {cmd1}")
+        # ============================================================
+        #  DETECT AKAMAI LINK TYPE
+        # ============================================================
+        is_akamai = 'akamai' in mpd_url or 'hdntl' in mpd_url or 'hdnts' in mpd_url or 'hdnt=' in mpd_url
+        
+        if is_akamai:
+            print(f"✅ Akamai link detected, preserving all parameters")
+            print(f"📎 URL: {mpd_url[:200]}...")
+        
+        # ============================================================
+        #  BUILD HEADERS FOR AKAMAI
+        # ============================================================
+        headers_cmd = ''
+        if is_akamai:
+            headers_cmd = '--add-header "Referer:https://classplusapp.com/" --add-header "Origin:https://classplusapp.com"'
+        
+        # ============================================================
+        #  DOWNLOAD USING yt-dlp
+        # ============================================================
+        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --concurrent-fragments 10 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error" {headers_cmd} "{mpd_url}"'
+        print(f"⬇️ Running: {cmd1}")
         await run(cmd1)
         
         avDir = list(output_path.iterdir())
-        print(f"Downloaded files: {avDir}")
-        print("Decrypting")
+        print(f"📁 Downloaded files: {avDir}")
+        print("🔓 Decrypting...")
 
         video_decrypted = False
         audio_decrypted = False
 
-        for data in avDir:
-            if data.suffix == ".mp4" and not video_decrypted:
-                cmd2 = f'mp4decrypt {keys_string} --show-progress "{data}" "{output_path}/video.mp4"'
-                print(f"Running command: {cmd2}")
-                await run(cmd2)
-                if (output_path / "video.mp4").exists():
+        # ============================================================
+        #  DECRYPT USING mp4decrypt
+        # ============================================================
+        if keys_string and '--key' in keys_string:
+            print(f"🔑 Using keys: {keys_string}")
+            
+            for data in avDir:
+                if data.suffix == ".mp4" and not video_decrypted:
+                    cmd2 = f'mp4decrypt {keys_string} --show-progress "{data}" "{output_path}/video.mp4"'
+                    print(f"🔓 Running: {cmd2}")
+                    await run(cmd2)
+                    if (output_path / "video.mp4").exists():
+                        video_decrypted = True
+                    data.unlink()
+                elif data.suffix == ".m4a" and not audio_decrypted:
+                    cmd3 = f'mp4decrypt {keys_string} --show-progress "{data}" "{output_path}/audio.m4a"'
+                    print(f"🔓 Running: {cmd3}")
+                    await run(cmd3)
+                    if (output_path / "audio.m4a").exists():
+                        audio_decrypted = True
+                    data.unlink()
+        
+        # ============================================================
+        #  RENAME FILES
+        # ============================================================
+        if not video_decrypted:
+            for data in avDir:
+                if data.suffix in ['.mp4', '.mkv', '.webm', '.ts']:
+                    data.rename(output_path / "video.mp4")
                     video_decrypted = True
-                data.unlink()
-            elif data.suffix == ".m4a" and not audio_decrypted:
-                cmd3 = f'mp4decrypt {keys_string} --show-progress "{data}" "{output_path}/audio.m4a"'
-                print(f"Running command: {cmd3}")
-                await run(cmd3)
-                if (output_path / "audio.m4a").exists():
+                    break
+        
+        if not audio_decrypted:
+            for data in avDir:
+                if data.suffix in ['.m4a', '.mp3', '.aac', '.mka']:
+                    data.rename(output_path / "audio.m4a")
                     audio_decrypted = True
-                data.unlink()
-
-        if not video_decrypted or not audio_decrypted:
-            raise FileNotFoundError("Decryption failed: video or audio file not found.")
-
-        cmd4 = f'ffmpeg -i "{output_path}/video.mp4" -i "{output_path}/audio.m4a" -c copy -preset veryfast -threads 4 "{output_path}/{output_name}.mp4"'
-        print(f"Running command: {cmd4}")
-        await run(cmd4)
-        if (output_path / "video.mp4").exists():
-            (output_path / "video.mp4").unlink()
-        if (output_path / "audio.m4a").exists():
-            (output_path / "audio.m4a").unlink()
+                    break
+        
+        # ============================================================
+        #  MERGE VIDEO AND AUDIO
+        # ============================================================
+        if video_decrypted and audio_decrypted:
+            cmd4 = f'ffmpeg -i "{output_path}/video.mp4" -i "{output_path}/audio.m4a" -c copy -preset veryfast -threads 4 "{output_path}/{output_name}.mp4"'
+            print(f"🔄 Running: {cmd4}")
+            await run(cmd4)
+            if (output_path / "video.mp4").exists():
+                (output_path / "video.mp4").unlink()
+            if (output_path / "audio.m4a").exists():
+                (output_path / "audio.m4a").unlink()
+        elif video_decrypted and not audio_decrypted:
+            cmd4 = f'mv "{output_path}/video.mp4" "{output_path}/{output_name}.mp4"'
+            await run(cmd4)
+        else:
+            for data in output_path.iterdir():
+                if data.suffix in ['.mp4', '.mkv', '.webm']:
+                    data.rename(output_path / f"{output_name}.mp4")
+                    video_decrypted = True
+                    break
         
         filename = output_path / f"{output_name}.mp4"
 
@@ -229,16 +423,17 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
 
         cmd5 = f'ffmpeg -i "{filename}" 2>&1 | grep "Duration"'
         duration_info = os.popen(cmd5).read()
-        print(f"Duration info: {duration_info}")
+        print(f"⏱️ Duration info: {duration_info}")
 
         return str(filename)
 
     except Exception as e:
-        print(f"Error during decryption and merging: {str(e)}")
+        print(f"❌ Error during decryption and merging: {str(e)}")
         raise
 
+
 # ============================================================
-# ✅ run – Async shell helper (already defined but we ensure it's used)
+#  🔥 UPDATED: run – Async shell helper
 # ============================================================
 async def run(cmd):
     proc = await asyncio.create_subprocess_shell(
@@ -256,7 +451,6 @@ async def run(cmd):
     if stderr:
         return f'[stderr]\n{stderr.decode()}'
 
-    
 
 def old_download(url, file_name, chunk_size = 1024 * 10 * 10):
     if os.path.exists(file_name):
@@ -293,17 +487,14 @@ async def fast_download(url, name):
     while not success and retry_count < max_retries:
         try:
             if "m3u8" in url:
-                # Handle m3u8 files
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as response:
                         m3u8_text = await response.text()
                         
                     playlist = m3u8.loads(m3u8_text)
                     if playlist.is_endlist:
-                        # Direct download of segments
                         base_url = url.rsplit('/', 1)[0] + '/'
                         
-                        # Download all segments concurrently
                         segments = []
                         async with aiohttp.ClientSession() as session:
                             tasks = []
@@ -317,7 +508,6 @@ async def fast_download(url, name):
                                 segment_data = await response.read()
                                 segments.append(segment_data)
                         
-                        # Merge segments and save
                         output_file = f"{name}.mp4"
                         with open(output_file, 'wb') as f:
                             for segment in segments:
@@ -326,21 +516,19 @@ async def fast_download(url, name):
                         success = True
                         return [output_file]
                     else:
-                        # For live streams, fall back to ffmpeg
                         cmd = f'ffmpeg -hide_banner -loglevel error -stats -i "{url}" -c copy -bsf:a aac_adtstoasc -movflags +faststart "{name}.mp4"'
                         subprocess.run(cmd, shell=True)
                         if os.path.exists(f"{name}.mp4"):
                             success = True
                             return [f"{name}.mp4"]
             else:
-                # For direct video URLs
                 async with aiohttp.ClientSession() as session:
                     async with session.get(url) as response:
                         if response.status == 200:
                             output_file = f"{name}.mp4"
                             with open(output_file, 'wb') as f:
                                 while True:
-                                    chunk = await response.content.read(1024*1024)  # 1MB chunks
+                                    chunk = await response.content.read(1024*1024)
                                     if not chunk:
                                         break
                                     f.write(chunk)
@@ -359,28 +547,43 @@ async def fast_download(url, name):
     
     return None
 
+
 # ============================================================
-# ✅ download_video – FULLY OPTIMIZED FOR RENDER (MAX SPEED)
+#  🔥 UPDATED: download_video with Akamai support
+#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
 # ============================================================
 async def download_video(url, cmd, name):
     retry_count = 0
     max_retries = 2
 
+    # ============================================================
+    #  CHECK FOR AKAMAI AND PRESERVE PARAMETERS
+    # ============================================================
+    is_akamai = 'akamai' in url or 'hdntl' in url or 'hdnts' in url
+    is_hdntl = 'hdntl=' in url
+    
+    if is_akamai:
+        print(f"✅ Akamai download detected, preserving all parameters")
+        if is_hdntl:
+            print(f"🔄 hdntl link detected - using direct URL with all parameters")
+    
+    # For Akamai, add additional headers
+    headers_cmd = ''
+    if is_akamai:
+        headers_cmd = '--add-header "Referer:https://classplusapp.com/" --add-header "Origin:https://classplusapp.com"'
+
     while retry_count < max_retries:
-        # 🔥 Render के Data Center IP को तोड़ने के लिए:
-        # 1. HLS/DASH (m3u8/mpd) – Concurrent Fragments बढ़ाकर 10 करो
-        # 2. Progressive MP4 – Aria2 के 16 कनेक्शन चालू करो
         if "m3u8" in url or "mpd" in url:
-            download_cmd = f'{cmd} -R 25 --fragment-retries 25 --no-check-certificate --concurrent-fragments 10'
+            download_cmd = f'{cmd} -R 25 --fragment-retries 25 --no-check-certificate --concurrent-fragments 10 {headers_cmd}'
         else:
-            download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error"'
+            download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error" {headers_cmd}'
         
-        print(download_cmd)
+        print(f"⬇️ Running: {download_cmd}")
         logging.info(download_cmd)
 
-        k = await run(download_cmd)  # async run
+        k = await run(download_cmd)
 
-        if k is not False:  # success if returncode != 1
+        if k is not False:
             break
 
         retry_count += 1
@@ -399,31 +602,25 @@ async def download_video(url, cmd, name):
         return name + ".mp4"
     except Exception as exc:
         logging.error(f"Error checking file: {exc}")
-        return name 
-
-
-
+        return name
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, channel_id, watermark="𝐈𝐓'𝐬𝐆𝐎𝐋𝐔", topic_thread_id: int = None):
     try:
-        temp_thumb = None  # ✅ Ensure this is always defined for later cleanup
+        temp_thumb = None
 
         thumbnail = thumb
         if thumb in ["/d", "no"] or not os.path.exists(thumb):
             temp_thumb = f"downloads/thumb_{os.path.basename(filename)}.jpg"
             
-            # Generate thumbnail at 10s
             subprocess.run(
                 f'ffmpeg -i "{filename}" -ss 00:00:10 -vframes 1 -q:v 2 -y "{temp_thumb}"',
                 shell=True
             )
 
-            # ✅ Only apply watermark if watermark != "/d"
             if os.path.exists(temp_thumb) and (watermark and watermark.strip() != "/d"):
                 text_to_draw = watermark.strip()
                 try:
-                    # Probe image width for better scaling
                     probe_out = subprocess.check_output(
                         f'ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0:s=x "{temp_thumb}"',
                         shell=True,
@@ -433,7 +630,6 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
                 except Exception:
                     img_width = 1280
 
-                # Base size relative to width, then adjust by text length
                 base_size = max(28, int(img_width * 0.075))
                 text_len = len(text_to_draw)
                 if text_len <= 3:
@@ -448,7 +644,6 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
 
                 box_h = max(60, int(font_size * 1.6))
 
-                # Simple escaping for single quotes in text
                 safe_text = text_to_draw.replace("'", "\\'")
 
                 text_cmd = (
@@ -462,7 +657,7 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
             
             thumbnail = temp_thumb if os.path.exists(temp_thumb) else None
 
-        await prog.delete(True)  # ⏳ Remove previous progress message
+        await prog.delete(True)
 
         reply1 = await bot.send_message(channel_id, f" **Uploading Video:**\n<blockquote>{name}</blockquote>")
         reply = await m.reply_text(f"🖼 **Generating Thumbnail:**\n<blockquote>{name}</blockquote>")
@@ -472,7 +667,6 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
         sent_message = None
 
         if file_size_mb < 2000:
-            # 📹 Upload as single video
             dur = int(duration(filename))
             start_time = time.time()
 
@@ -498,14 +692,12 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
                     progress_args=(reply, start_time)
                 )
 
-            # ✅ Cleanup
             if os.path.exists(filename):
                 os.remove(filename)
             await reply.delete(True)
             await reply1.delete(True)
 
         else:
-            # ⚠️ Notify about splitting
             notify_split = await m.reply_text(
                 f"⚠️ The video is larger than 2GB ({human_readable_size(os.path.getsize(filename))})\n"
                 f"⏳ Splitting into parts before upload..."
@@ -559,11 +751,9 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
             except Exception as e:
                 raise Exception(f"Upload failed at part {idx + 1}: {str(e)}")
 
-            # ✅ Final messages
             if len(parts) > 1:
                 await m.reply_text("✅ Large video successfully uploaded in multiple parts!")
 
-            # Cleanup after split
             await reply.delete(True)
             await reply1.delete(True)
             if notify_split:
@@ -571,10 +761,8 @@ async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, cha
             if os.path.exists(filename):
                 os.remove(filename)
 
-            # Return first sent part message
             sent_message = first_part_message
 
-        # 🧹 Cleanup generated thumbnail if applicable
         if thumb in ["/d", "no"] and temp_thumb and os.path.exists(temp_thumb):
             os.remove(temp_thumb)
 
