@@ -1,4 +1,4 @@
-# itsgolu.py / utils.py (Complete Updated Code)
+# itsgolu.py (Complete Code)
 
 import os
 import re
@@ -320,61 +320,32 @@ def vid_info(info):
 
 
 # ============================================================
-#  🔥 NEW: PW Video Downloader (Direct m3u8/MPD support)
+#  🔥 PW Video Downloader (Direct m3u8/MPD support)
 # ============================================================
-async def download_pw_video(url, name, quality="720"):
+async def download_pw_video(url, name, quality="360"):
     """
-    Specialized downloader for PW videos using direct MPD/m3u8 links.
-    Uses yt-dlp with optimal settings for DASH/HLS streams.
+    Specialized downloader for PW videos using direct m3u8 links.
     """
     try:
         print(f"🎬 Downloading PW video: {name}")
         print(f"🔗 URL: {url[:150]}...")
         
-        # Check if URL is valid
-        if not url or url.startswith('error'):
+        if not url or not url.startswith('http'):
             raise Exception(f"Invalid URL: {url}")
         
         # ============================================================
-        #  METHOD 1: Try direct ffmpeg download (most reliable)
-        # ============================================================
-        try:
-            print("🔄 Trying ffmpeg direct download...")
-            ffmpeg_cmd = f'ffmpeg -y -i "{url}" -c copy -bsf:a aac_adtstoasc -movflags +faststart "{name}.mp4" 2>&1'
-            
-            process = await asyncio.create_subprocess_shell(
-                ffmpeg_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
-                file_size = os.path.getsize(f'{name}.mp4')
-                if file_size > 1000:  # At least 1KB
-                    print(f"✅ ffmpeg download successful: {file_size} bytes")
-                    return f'{name}.mp4'
-                else:
-                    os.remove(f'{name}.mp4')
-        except Exception as e:
-            print(f"⚠️ ffmpeg failed: {e}")
-        
-        # ============================================================
-        #  METHOD 2: Try yt-dlp with multiple format options
+        #  METHOD 1: yt-dlp (preferred)
         # ============================================================
         format_options = [
-            f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
-            'bestvideo+bestaudio/best',
             'best',
-            'bestvideo[height<=720]+bestaudio',
-            'bestvideo+besta',
-            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'bestvideo+bestaudio',
+            'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
+            'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
         ]
         
         for fmt in format_options:
             try:
                 print(f"🔄 Trying yt-dlp format: {fmt}")
-                
                 cmd = [
                     'yt-dlp',
                     '-f', fmt,
@@ -382,8 +353,8 @@ async def download_pw_video(url, name, quality="720"):
                     '--allow-unplayable-format',
                     '--no-check-certificate',
                     '--concurrent-fragments', '10',
-                    '--retries', '25',
-                    '--fragment-retries', '25',
+                    '--retries', '15',
+                    '--fragment-retries', '15',
                     '--http-chunk-size', '10M',
                     '--buffer-size', '16K',
                     '--no-warnings',
@@ -396,89 +367,50 @@ async def download_pw_video(url, name, quality="720"):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
-                stdout, stderr = await process.communicate()
+                stdout, stderr = await process.communicate(timeout=600)
                 
-                if process.returncode == 0:
-                    if os.path.exists(f'{name}.mp4'):
-                        file_size = os.path.getsize(f'{name}.mp4')
-                        if file_size > 1000:
-                            print(f"✅ yt-dlp successful with format {fmt}: {file_size} bytes")
-                            return f'{name}.mp4'
-                        else:
-                            os.remove(f'{name}.mp4')
-                    elif os.path.exists(f'{name}.mkv'):
-                        # Rename if mkv
-                        os.rename(f'{name}.mkv', f'{name}.mp4')
+                if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
+                    file_size = os.path.getsize(f'{name}.mp4')
+                    if file_size > 10000:
+                        print(f"✅ yt-dlp successful: {file_size} bytes")
                         return f'{name}.mp4'
-                else:
-                    error_msg = stderr.decode() if stderr else ''
-                    if 'requested format' in error_msg.lower():
-                        continue
-                    print(f"⚠️ Format {fmt} failed: {error_msg[:150]}")
-                    continue
-                    
+                    else:
+                        os.remove(f'{name}.mp4')
             except Exception as e:
-                print(f"⚠️ Error with format {fmt}: {e}")
+                print(f"⚠️ Format {fmt} failed: {e}")
                 continue
         
         # ============================================================
-        #  METHOD 3: Try without format selection (yt-dlp default)
+        #  METHOD 2: ffmpeg fallback
         # ============================================================
-        try:
-            print("🔄 Trying yt-dlp default format...")
-            cmd = [
-                'yt-dlp',
-                '--merge-output-format', 'mp4',
-                '--allow-unplayable-format',
-                '--no-check-certificate',
-                '--no-warnings',
-                '-o', f'{name}.mp4',
-                url
-            ]
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
-                file_size = os.path.getsize(f'{name}.mp4')
-                if file_size > 1000:
-                    print(f"✅ Default yt-dlp successful: {file_size} bytes")
-                    return f'{name}.mp4'
-        except Exception as e:
-            print(f"⚠️ Default yt-dlp failed: {e}")
+        print("🔄 Trying ffmpeg fallback...")
+        ffmpeg_cmd = f'ffmpeg -y -user_agent "Mozilla/5.0" -i "{url}" -c copy -bsf:a aac_adtstoasc -movflags +faststart "{name}.mp4"'
+        process = await asyncio.create_subprocess_shell(ffmpeg_cmd)
+        await process.wait()
+        
+        if os.path.exists(f'{name}.mp4'):
+            file_size = os.path.getsize(f'{name}.mp4')
+            if file_size > 10000:
+                print(f"✅ ffmpeg successful: {file_size} bytes")
+                return f'{name}.mp4'
+            else:
+                os.remove(f'{name}.mp4')
         
         # ============================================================
-        #  METHOD 4: Try with aria2c external downloader
+        #  METHOD 3: wget fallback
         # ============================================================
-        try:
-            print("🔄 Trying yt-dlp with aria2c...")
-            cmd = [
-                'yt-dlp',
-                '-f', 'best',
-                '--merge-output-format', 'mp4',
-                '--allow-unplayable-format',
-                '--no-check-certificate',
-                '--external-downloader', 'aria2c',
-                '--downloader-args', 'aria2c:-x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error',
-                '-o', f'{name}.mp4',
-                url
-            ]
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
+        print("🔄 Trying wget fallback...")
+        wget_cmd = f'wget -O "{name}.mp4" --timeout=300 --tries=3 "{url}"'
+        process = await asyncio.create_subprocess_shell(wget_cmd)
+        await process.wait()
+        
+        if os.path.exists(f'{name}.mp4'):
+            file_size = os.path.getsize(f'{name}.mp4')
+            if file_size > 10000:
+                print(f"✅ wget successful: {file_size} bytes")
                 return f'{name}.mp4'
-        except Exception as e:
-            print(f"⚠️ yt-dlp with aria2c failed: {e}")
+            else:
+                os.remove(f'{name}.mp4')
         
         # ============================================================
         #  CHECK FOR ANY DOWNLOADED FILE
@@ -489,12 +421,6 @@ async def download_pw_video(url, name, quality="720"):
                 return f'{base_name}{ext}'
             if os.path.exists(f'{name}{ext}'):
                 return f'{name}{ext}'
-        
-        # Check current directory for any matching file
-        for ext in ['.mp4', '.mkv', '.webm', '.ts']:
-            for file in os.listdir('.'):
-                if file.startswith(base_name) and file.endswith(ext):
-                    return file
         
         return None
         
