@@ -46,6 +46,10 @@ Flask
 gunicorn
 itsdangerous
 
+pycryptodome==3.19.0
+yt-dlp==2023.12.30
+aiofiles==23.2.1
+
 
 # Others
 pytz
