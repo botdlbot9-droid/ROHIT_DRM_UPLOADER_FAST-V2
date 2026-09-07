@@ -9,7 +9,7 @@ import re
 from pyrogram import Client
 from pyrogram.types import Message
 
-async def generate_video_url(batch_id: str, video_id: str, token: str, random_id: str, quality: str = '360') -> str:
+async def generate_video_url(batch_id: str, video_id: str, token: str, random_id: str, quality: str = '720') -> str:
     """
     PW Video URL Generator - Same as HTML Dashboard
     API: https://pw-vid-url.quiz-book.workers.dev/
@@ -49,7 +49,7 @@ async def generate_video_url(batch_id: str, video_id: str, token: str, random_id
         raise Exception(f"API request failed: {str(e)}")
 
 
-async def download_pw_video(url: str, name: str, quality: str = '360') -> str:
+async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
     """
     Download PW video from M3U8 URL using yt-dlp
     """
@@ -124,7 +124,7 @@ async def download_pw_video(url: str, name: str, quality: str = '360') -> str:
         return None
 
 
-async def download_and_upload_video(video_url: str, message: Message, client: Client, quality: str = '360'):
+async def download_and_upload_video(video_url: str, message: Message, client: Client, quality: str = '720'):
     """
     Download video from URL and upload to Telegram
     """
@@ -218,11 +218,11 @@ async def process_course_and_upload(client: Client, message: Message, json_path:
                     try:
                         # Generate URL using API
                         video_url = await generate_video_url(
-                            batch_id, video_id, token, random_id, quality='360'
+                            batch_id, video_id, token, random_id, quality='720'
                         )
                         
                         # Download and upload
-                        await download_and_upload_video(video_url, message, client, quality='360')
+                        await download_and_upload_video(video_url, message, client, quality='720')
                         
                     except Exception as e:
                         await message.reply_text(f"❌ Error with video {video_id}: {str(e)}")
