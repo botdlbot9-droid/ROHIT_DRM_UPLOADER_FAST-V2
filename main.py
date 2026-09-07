@@ -404,16 +404,17 @@ async def send_logs(client: Client, m: Message):
 
 
 # ============================================================
-#  🆕 NEW COMMAND: /add_course
+#  🆕 NEW COMMAND: /add_course (with all features)
 # ============================================================
 @bot.on_message(filters.command("add_course") & auth_filter)
 async def add_course_command(client: Client, message: Message):
     """Starts the process to add a course and upload its videos."""
+    user_id = message.from_user.id
     await message.reply_text(
         "📤 **Course Add Karne Ke Liye:**\n\n"
         "1️⃣ Pehle **JSON File** bhejo (jisme course data ho).\n"
         "2️⃣ Phir **Auth String** bhejo (jo encrypted ho).\n\n"
-        "**Process:** JSON → Auth → Video Upload"
+        "**Process:** JSON → Auth → Resolution → Batch Name → Channel ID → Video Upload"
     )
     
     # Step 1: Wait for JSON file
@@ -427,7 +428,6 @@ async def add_course_command(client: Client, message: Message):
         await message.reply_text("❌ Invalid file. Please send a JSON document.")
         return
     
-    # Download the JSON file
     json_path = await json_msg.download()
     await message.reply_text("✅ JSON Received! Please send the Auth String now.")
     
@@ -441,19 +441,75 @@ async def add_course_command(client: Client, message: Message):
         return
     
     auth_string = auth_msg.text.strip()
-    
     if not auth_string:
-        await message.reply_text("❌ Invalid auth string. Please send a valid encrypted string.")
+        await message.reply_text("❌ Invalid auth string.")
         if os.path.exists(json_path):
             os.remove(json_path)
         return
-    
-    # Step 3: Process the course and videos
-    await process_course_and_upload(client, message, json_path, auth_string)
+
+    # Step 3: Ask for Resolution
+    res_msg = await message.reply_text(
+        "🎞️ **Select Video Quality:**\n\n"
+        "Send:\n"
+        "`240` - 240p\n"
+        "`360` - 360p\n"
+        "`480` - 480p\n"
+        "`720` - 720p"
+    )
+    try:
+        quality_msg = await client.listen(message.chat.id, timeout=30)
+        quality = quality_msg.text.strip()
+        if quality not in ['240', '360', '480', '720']:
+            await message.reply_text("❌ Invalid quality! Using default 720p.")
+            quality = '720'
+    except asyncio.TimeoutError:
+        quality = '720'
+        await message.reply_text("⏳ Timeout! Using default 720p.")
+    finally:
+        await res_msg.delete()
+
+    # Step 4: Ask for Batch Name
+    await message.reply_text("📛 **Enter Batch Name:**\n(Example: Physics Wallah - Batch 2026)")
+    try:
+        batch_name_msg = await client.listen(message.chat.id, timeout=30)
+        batch_name = batch_name_msg.text.strip()
+        if not batch_name:
+            batch_name = "Unknown Batch"
+    except asyncio.TimeoutError:
+        batch_name = "Unknown Batch"
+        await message.reply_text("⏳ Timeout! Using 'Unknown Batch'.")
+
+    # Step 5: Ask for Channel ID
+    await message.reply_text(
+        "📢 **Enter Channel/Group ID where videos should be uploaded:**\n"
+        "(Example: `-1001234567890`)\n\n"
+        "⚠️ **Make sure bot is admin in that group/channel!**"
+    )
+    try:
+        channel_msg = await client.listen(message.chat.id, timeout=30)
+        channel_id_str = channel_msg.text.strip()
+        channel_id = int(channel_id_str)
+    except asyncio.TimeoutError:
+        channel_id = message.chat.id
+        await message.reply_text(f"⏳ Timeout! Using current chat: `{channel_id}`")
+    except ValueError:
+        channel_id = message.chat.id
+        await message.reply_text(f"❌ Invalid ID! Using current chat: `{channel_id}`")
+
+    # Step 6: Process the course with all parameters
+    await process_course_and_upload(
+        client, 
+        message, 
+        json_path, 
+        auth_string, 
+        quality=quality, 
+        batch_name=batch_name, 
+        channel_id=channel_id
+    )
 
 
 # ============================================================
-#  🔥 MAIN DRM HANDLER - UPDATED WITH COMPLETE CLASSPLUS SUPPORT
+#  🔥 MAIN DRM HANDLER (Existing - Kept as is)
 # ============================================================
 @bot.on_message(filters.command(["drm"]) & auth_filter)
 async def txt_handler(bot: Client, m: Message):
@@ -756,22 +812,14 @@ async def txt_handler(bot: Client, m: Message):
                 cmd = f'yt-dlp -o "{name}.%(ext)s" -f "bestvideo[height<={raw_text2}]+bestaudio" --hls-prefer-ffmpeg --no-keep-video --remux-video mkv --no-warning "{url}"'
 
             # ============================================================
-            #  🔥 UPDATED: CLASSPLUS / AKAMAI LOGIC WITH hdntl SUPPORT
-            #  - Supports L1 (key+userIds)
-            #  - Supports L2 (hdntl in path) - NEW FORMAT
-            #  - Supports L3 (hdnts in query) - WORKING FORMAT
+            #  🔥 UPDATED: CLASSPLUS / AKAMAI LOGIC
             # ============================================================
             elif 'classplusapp' in url or "testbook.com" in url or "classplusapp.com/drm" in url or "media-cdn.classplusapp.com/drm" in url or "akamai-cdn.classplusapp.com" in url:
                 base_url = url
-                
-                # ============================================================
-                #  🔥 FIX: Decode URL first for hdntl links
-                # ============================================================
                 decoded_url = urllib.parse.unquote(url)
                 print(f"🔗 Original URL: {url[:150]}...")
                 print(f"🔗 Decoded URL: {decoded_url[:150]}...")
                 
-                # ---------- EXTRACT contentHashId / contentHashIdl ----------
                 content_id = None
                 hash_patterns = [
                     r'contentHashId=([^&]+)',
@@ -785,7 +833,6 @@ async def txt_handler(bot: Client, m: Message):
                         content_id = match.group(1).split('&')[0]
                         break
                 
-                # ---------- EXTRACT video ID from path ----------
                 vidkey = None
                 vid_patterns = [
                     r'/lc/([^/]+)/',
@@ -798,7 +845,6 @@ async def txt_handler(bot: Client, m: Message):
                         vidkey = match.group(1)
                         break
                 
-                # Also try to get from URL path segments
                 if not vidkey:
                     parts = url.split('/')
                     for part in parts:
@@ -806,15 +852,9 @@ async def txt_handler(bot: Client, m: Message):
                             vidkey = part
                             break
                 
-                # ============================================================
-                #  🔥 FIX: Special handling for hdntl with encoded path
-                # ============================================================
                 is_hdntl = 'hdntl=' in url
-                is_hdnts = 'hdnts=' in url or 'hdnts?' in url
-                
                 if is_hdntl:
                     print("✅ hdntl link detected - extracting content ID from decoded path")
-                    # Extract content ID from the decoded URL
                     match = re.search(r'/lc/([^/]+)/', decoded_url)
                     if match:
                         vidkey = match.group(1)
@@ -823,7 +863,6 @@ async def txt_handler(bot: Client, m: Message):
                 print(f"🔑 content_id: {content_id}")
                 print(f"🔑 vidkey: {vidkey}")
                 
-                # ---------- BUILD HEADERS ----------
                 headers = {
                     'host': 'api.classplusapp.com',
                     'x-access-token': f'{cptoken}',    
@@ -841,10 +880,7 @@ async def txt_handler(bot: Client, m: Message):
                     'accept-encoding': 'gzip'
                 }
                 
-                # ---------- USE content_id OR vidkey ----------
                 api_content_id = content_id or vidkey
-                
-                # If still no content_id, try to extract from URL path
                 if not api_content_id:
                     match = re.search(r'/([a-zA-Z0-9]+-[0-9]+[a-z]?)/', url)
                     if match:
@@ -866,7 +902,6 @@ async def txt_handler(bot: Client, m: Message):
                         
                         print(f"📦 ClassPlus API Response: {res}")
                         
-                        # Check if it's a DRM URL
                         if ("testbook.com" in base_url or "classplusapp.com/drm" in base_url or 
                             "media-cdn.classplusapp.com/drm" in base_url or '/drm/' in base_url or
                             "akamai-cdn.classplusapp.com" in base_url):
@@ -886,9 +921,6 @@ async def txt_handler(bot: Client, m: Message):
                         
                     except Exception as e:
                         print(f"⚠️ ClassPlus API Error: {e}")
-                        # ============================================================
-                        #  🔥 FIX: For hdntl links, use URL directly with all parameters
-                        # ============================================================
                         if is_hdntl:
                             print("🔄 hdntl link - using URL directly with all parameters")
                             url = base_url
