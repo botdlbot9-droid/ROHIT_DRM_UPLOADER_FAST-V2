@@ -322,7 +322,7 @@ def vid_info(info):
 # ============================================================
 #  🔥 PW Video Downloader (Direct m3u8/MPD support)
 # ============================================================
-async def download_pw_video(url, name, quality="360"):
+async def download_pw_video(url, name, quality="720"):
     """
     Specialized downloader for PW videos using direct m3u8 links.
     """
@@ -339,7 +339,6 @@ async def download_pw_video(url, name, quality="360"):
         format_options = [
             'best',
             'bestvideo+bestaudio',
-            'bestvideo[height<=480]+bestaudio/best[height<=480]/best',
             'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
         ]
         
