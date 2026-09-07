@@ -509,7 +509,7 @@ async def add_course_command(client: Client, message: Message):
 
 
 # ============================================================
-#  🔥 MAIN DRM HANDLER (Existing - Kept as is)
+#  🔥 MAIN DRM HANDLER (Updated for ClassX .m3u8 Support)
 # ============================================================
 @bot.on_message(filters.command(["drm"]) & auth_filter)
 async def txt_handler(bot: Client, m: Message):
@@ -933,14 +933,38 @@ async def txt_handler(bot: Client, m: Message):
                     url = base_url
                     keys_string = ""
 
-            elif "https://static-trans-v1.classx.co.in" in url or "https://static-trans-v2.classx.co.in" in url:
-                base_with_params, signature = url.split("*")
-                base_clean = base_with_params.split(".mkv")[0] + ".mkv"
-                if "static-trans-v1.classx.co.in" in url:
+            # ============================================================
+            #  🆕 UPDATED: CLASSPLUS / AKAMAI LOGIC
+            # ============================================================
+            elif "https://static-trans-v1.classx.co.in" in url or "https://static-trans-v2.classx.co.in" in url or "transcoded-videos.classx.co.in" in url:
+                # Pehle '*' se signature alag karein
+                if "*" in url:
+                    base_with_params, signature = url.split("*")
+                else:
+                    # Agar '*' nahi hai toh poori URL ko base maanein aur signature empty rakhein
+                    base_with_params = url
+                    signature = ""
+
+                # .mkv ya .m3u8 dono ke liye kaam karega
+                if ".mkv" in base_with_params:
+                    base_clean = base_with_params.split(".mkv")[0] + ".mkv"
+                elif ".m3u8" in base_with_params:
+                    base_clean = base_with_params.split(".m3u8")[0] + ".m3u8"
+                else:
+                    base_clean = base_with_params  # Agar koi extension nahi hai toh original rakhein
+                
+                # Domain ko Akamai CDN se replace karein
+                if "static-trans-v1.classx.co.in" in url or "transcoded-videos.classx.co.in" in url:
                     base_clean = base_clean.replace("https://static-trans-v1.classx.co.in", "https://appx-transcoded-videos-mcdn.akamai.net.in")
+                    base_clean = base_clean.replace("https://transcoded-videos.classx.co.in", "https://appx-transcoded-videos-mcdn.akamai.net.in")
                 elif "static-trans-v2.classx.co.in" in url:
                     base_clean = base_clean.replace("https://static-trans-v2.classx.co.in", "https://transcoded-videos-v2.classx.co.in")
-                url = f"{base_clean}*{signature}"
+                
+                # Agar signature tha toh wapas jodein, nahi toh sirf base_clean URL banaayein
+                if signature:
+                    url = f"{base_clean}*{signature}"
+                else:
+                    url = base_clean
             
             elif "https://static-rec.classx.co.in/drm/" in url:
                 base_with_params, signature = url.split("*")
