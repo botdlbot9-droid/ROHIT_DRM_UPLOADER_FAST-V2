@@ -6,6 +6,7 @@ from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Util.Padding import unpad
 import hashlib
 import re
+import hmac
 
 async def decrypt_auth_string(encrypted_base64: str) -> dict:
     """
@@ -16,18 +17,12 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
     
     try:
         # ============================================================
-        #  🔥 FIX 1: Clean the Auth String
+        #  STEP 1: Clean the Auth String
         # ============================================================
-        # Remove all whitespace, newlines, and extra characters
         encrypted_base64 = re.sub(r'\s+', '', encrypted_base64)
-        
-        # URL-safe Base64 to Standard Base64
         encrypted_base64 = encrypted_base64.replace('-', '+').replace('_', '/')
         
-        # ============================================================
-        #  🔥 FIX 2: Add proper Base64 padding
-        # ============================================================
-        # Base64 length must be multiple of 4
+        # Add proper Base64 padding
         missing_padding = len(encrypted_base64) % 4
         if missing_padding:
             encrypted_base64 += '=' * (4 - missing_padding)
@@ -35,12 +30,11 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
         print(f"🔑 Auth String (cleaned): {encrypted_base64[:50]}...")
         
         # ============================================================
-        #  🔥 FIX 3: Decode Base64
+        #  STEP 2: Decode Base64
         # ============================================================
         try:
             encrypted_data = base64.b64decode(encrypted_base64)
         except Exception as e:
-            # Try with URL-safe decoding
             try:
                 encrypted_data = base64.urlsafe_b64decode(encrypted_base64)
             except Exception as e2:
@@ -49,9 +43,9 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
         print(f"📦 Decoded data length: {len(encrypted_data)} bytes")
         
         # ============================================================
-        #  🔥 FIX 4: Extract Salt, IV, and Ciphertext
+        #  STEP 3: Extract Salt, IV, and Ciphertext
         # ============================================================
-        if len(encrypted_data) < 48:  # 16 (salt) + 16 (iv) + 16 (min ciphertext)
+        if len(encrypted_data) < 48:
             raise ValueError(f"Data too short: {len(encrypted_data)} bytes. Expected at least 48.")
         
         salt = encrypted_data[:16]
@@ -63,17 +57,14 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
         print(f"📄 Ciphertext length: {len(ciphertext)} bytes")
         
         # ============================================================
-        #  🔥 FIX 5: Derive Key using PBKDF2
+        #  STEP 4: Derive Key using PBKDF2 (Python 3.12+ compatible)
         # ============================================================
-        try:
-            key = PBKDF2(password, salt, dkLen=32, count=100000, hmac_hash_module=hashlib.sha256)
-        except Exception as e:
-            raise ValueError(f"PBKDF2 key derivation failed: {str(e)}")
+        key = await derive_key_async(password, salt)
         
         print(f"🔐 Key derived: {key.hex()[:16]}...")
         
         # ============================================================
-        #  🔥 FIX 6: Decrypt
+        #  STEP 5: Decrypt
         # ============================================================
         try:
             cipher = AES.new(key, AES.MODE_CBC, iv)
@@ -82,25 +73,24 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
             raise ValueError(f"AES decryption failed: {str(e)}")
         
         # ============================================================
-        #  🔥 FIX 7: Unpad
+        #  STEP 6: Unpad
         # ============================================================
         try:
             decrypted = unpad(decrypted_padded, AES.block_size)
-        except ValueError as e:
-            # Try removing padding manually
+        except ValueError:
             try:
                 pad_len = decrypted_padded[-1]
                 if pad_len < AES.block_size:
                     decrypted = decrypted_padded[:-pad_len]
                 else:
-                    raise ValueError(f"Invalid padding: {e}")
+                    raise ValueError("Invalid padding")
             except Exception as e2:
-                raise ValueError(f"Unpadding failed: {str(e)}. Original error: {str(e)}")
+                raise ValueError(f"Unpadding failed: {str(e2)}")
         
         print(f"✅ Decrypted data length: {len(decrypted)} bytes")
         
         # ============================================================
-        #  🔥 FIX 8: Parse JSON
+        #  STEP 7: Parse JSON
         # ============================================================
         try:
             decrypted_text = decrypted.decode('utf-8')
@@ -112,7 +102,7 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
             raise ValueError(f"JSON parse failed: {str(e)}")
         
         # ============================================================
-        #  🔥 FIX 9: Extract required fields
+        #  STEP 8: Extract required fields
         # ============================================================
         token = data.get('testItem1')
         random_id = data.get('testItem3')
@@ -131,10 +121,78 @@ async def decrypt_auth_string(encrypted_base64: str) -> dict:
         }
         
     except Exception as e:
-        # ============================================================
-        #  🔥 FIX 10: Detailed error logging
-        # ============================================================
         error_msg = str(e)
         print(f"❌ Decryption error: {error_msg}")
         print(f"❌ Auth String (first 100 chars): {encrypted_base64[:100]}...")
         raise ValueError(f"Decryption failed: {error_msg}")
+
+
+# ============================================================
+#  🔥 ASYNC KEY DERIVATION FUNCTION (Python 3.12+ compatible)
+# ============================================================
+async def derive_key_async(password: str, salt: bytes) -> bytes:
+    """
+    Derives a 32-byte AES key using PBKDF2 with HMAC-SHA256.
+    Compatible with Python 3.10, 3.11, and 3.12+.
+    """
+    # Method 1: Try using hashlib.sha256 directly (works in most versions)
+    try:
+        key = PBKDF2(password, salt, dkLen=32, count=100000, hmac_hash_module=hashlib.sha256)
+        print("✅ PBKDF2: Using hashlib.sha256")
+        return key
+    except AttributeError:
+        pass
+    
+    # Method 2: Try using hashlib.sha256() as a callable
+    try:
+        key = PBKDF2(password, salt, dkLen=32, count=100000, hmac_hash_module=lambda: hashlib.sha256())
+        print("✅ PBKDF2: Using lambda: hashlib.sha256()")
+        return key
+    except Exception:
+        pass
+    
+    # Method 3: Try using Crypto.Hash.SHA256
+    try:
+        from Crypto.Hash import SHA256
+        key = PBKDF2(password, salt, dkLen=32, count=100000, hmac_hash_module=SHA256)
+        print("✅ PBKDF2: Using Crypto.Hash.SHA256")
+        return key
+    except Exception:
+        pass
+    
+    # Method 4: Manual PBKDF2 implementation (fallback)
+    print("🔄 PBKDF2: Using manual implementation")
+    return pbkdf2_manual(password, salt, 100000, 32)
+
+
+# ============================================================
+#  🔥 MANUAL PBKDF2 IMPLEMENTATION (Fallback)
+# ============================================================
+def pbkdf2_manual(password: str, salt: bytes, iterations: int, dklen: int) -> bytes:
+    """
+    Manual PBKDF2 implementation using HMAC-SHA256.
+    This is a fallback for when the Crypto library fails.
+    """
+    password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+    
+    def prf(data: bytes) -> bytes:
+        """HMAC-SHA256 pseudo-random function"""
+        return hmac.new(password_bytes, data, hashlib.sha256).digest()
+    
+    # Calculate number of blocks needed
+    blocks = (dklen + 31) // 32
+    result = b''
+    
+    for i in range(1, blocks + 1):
+        # U1 = PRF(password, salt || INT(i))
+        u = prf(salt + i.to_bytes(4, 'big'))
+        t = u
+        
+        # U2 = PRF(password, U1), U3 = PRF(password, U2), ...
+        for _ in range(iterations - 1):
+            u = prf(u)
+            t = bytes(x ^ y for x, y in zip(t, u))
+        
+        result += t
+    
+    return result[:dklen]
