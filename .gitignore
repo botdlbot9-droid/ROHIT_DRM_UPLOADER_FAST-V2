@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pythonenv*
+
+# Pyrogram
+*.session
+*.session-journal
+
+# Downloads & Temp
+downloads/
+temp_downloads/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.flv
+*.wmv
+*.webm
+*.3gp
+*.m4v
+*.mpg
+*.mpeg
+*.ts
+*.m3u8
+*.mpd
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.zip
+*.rar
+*.7z
+*.tar
+*.gz
+
+# Logs
+logs.txt
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Railway / Heroku
+.railway/
+heroku.yml
+
+# Misc
+*.json
+*.txt
+!requirements.txt
+!youtube_cookies.txt
