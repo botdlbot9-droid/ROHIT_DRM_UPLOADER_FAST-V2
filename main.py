@@ -74,6 +74,11 @@ pyromod.listen.Client.listen = pyromod.listen.listen
 
 from db import db
 
+# ============================================================
+#  🆕 NEW MODULE IMPORTS FOR COURSE HANDLING
+# ============================================================
+from modules.course_handler import process_course_and_upload
+
 auto_flags = {}
 auto_clicked = False
 
@@ -175,7 +180,7 @@ bot.add_handler(MessageHandler(auth.my_plan_cmd, filters.command("plan") & filte
 cookies_file_path = os.getenv("cookies_file_path", "youtube_cookies.txt")
 api_url = "http://master-api-v3.vercel.app/"
 api_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiNzkxOTMzNDE5NSIsInRnX3VzZXJuYW1lIjoi4p61IFtvZmZsaW5lXSIsImlhdCI6MTczODY5MjA3N30.SXzZ1MZcvMp5sGESj0hBKSghhxJ3k1GTWoBUbivUe1I"
-cwtoken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJpYXQiOjE3NTExOTcwNjQsImNvbiI6eyJpc0FkbWluIjpmYWxzZSwiYXVzZXIiOiJVMFZ6TkdGU2NuQlZjR3h5TkZwV09FYzBURGxOZHowOSIsImlkIjoiVWtoeVRtWkhNbXRTV0RjeVJIcEJUVzExYUdkTlp6MDkiLCJmaXJzdF9uYW1lIjoiVWxadVFXaFBaMnAwSzJsclptVXpkbGxXT0djMlREWlRZVFZ5YzNwdldXNXhhVEpPWjFCWFYyd3pWVDA5IiwiZW1haWwiOiJWSGgyWjB0d2FUZFdUMVZYYmxoc2FsZFJSV2xrY0RWM2FGSkRSU3RzV0c5M1pDOW1hR0kxSzBOeVRUMDkiLCJwaG9uZSI6IldGcFZSSFZOVDJFeGNFdE9Oak4zUzJocmVrNHdRVDA5IiwiYXZhdGFyIjoiSzNWc2NTOHpTMHAwUW5sa2JrODNSRGx2ZWtOaVVUMDkiLCJyZWZlcnJhbF9jb2RlIjoiWkdzMlpUbFBORGw2Tm5OclMyVTRiRVIxTkVWb1FUMDkiLCJkZXZpY2VfdHlwZSI6ImFuZHJvaWQiLCJkZXZpY2VfdmVyc2lvbiI6IlEoQW5kcm9pZCAxMC4wKSIsImRldmljZV9tb2RlbCI6IlhpYW9taSBNMjAwN0oyMENJIiwicmVtb3RlX2FkZHIiOiI0NC4yMDIuMTkzLjIyMCJ9fQ.ONBsbnNwCQQtKMK2h18LCi73e90s2Cr63ZaIHtYueM-Gt5Z4sF6Ay-SEaKaIf1ir9ThflrtTdi5eFkUGIcI78R1stUUch_GfBXZsyg7aVyH2wxm9lKsFB2wK3qDgpd0NiBoT-ZsTrwzlbwvCFHhMp9rh83D4kZIPPdbp5yoA_06L0Zr4fNq3S328G8a8DtboJFkmxqG2T1yyVE2wLIoR3b8J3ckWTlT_VY2CCx8RjsstoTrkL8e9G5ZGa6sksMb93ugautin7GKz-nIz27pCr0h7g9BCoQWtL69mVC5xvVM3Z324vo5uVUPBi1bCG-ptpD9GWQ4exOBk9fJvGo-vRg"
+cwtoken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJpYXQiOjE3NTExOTcwNjQsImNvbiI6eyJpc0FkbWluIjpmYWxzZSwiYXVzZXIiOiJVMFZ6TkdGU2NuQlZjR3h5TkZwV09FYzBURGxOZHowOSIsImlkIjoiVWtoeVRtWkhNbXRTV0RjeVJIcEJUVzExYUdkTlp6MDkiLCJmaXJzdF9uYW1lIjoiVWxadVFXaFBaMnAwSzJsclptVXpkbGxXT0djMlREWlRZVFZ5YzNwdldXNXhhVEpPWjFCWFYyd3pWVDA5IiwiZW1haWwiOiJWSGgyWjB0d2FUZFdUMVZYYmxoc2FsZFJSV2xrY0RWM2FGSkRSU3RzV0c5M1pDOW1hR0kxSzBOeVRUMDkiLCJwaG9uZSI6IldGcFZSSFZOVTJFeGNFdE9Oak4zUzJocmVrNHdRVDA5IiwiYXZhdGFyIjoiSzNWc2NTOHpTMHAwUW5sa2JrODNSRGx2ZWtOaVVUMDkiLCJyZWZlcnJhbF9jb2RlIjoiWkdzMlpUbFBORGw2Tm5OclMyVTRiRVIxTkVWb1FUMDkiLCJkZXZpY2VfdHlwZSI6ImFuZHJvaWQiLCJkZXZpY2VfdmVyc2lvbiI6IlEoQW5kcm9pZCAxMC4wKSIsImRldmljZV9tb2RlbCI6IlhpYW9taSBNMjAwN0oyMENJIiwicmVtb3RlX2FkZHIiOiI0NC4yMDIuMTkzLjIyMCJ9fQ.ONBsbnNwCQQtKMK2h18LCi73e90s2Cr63ZaIHtYueM-Gt5Z4sF6Ay-SEaKaIf1ir9ThflrtTdi5eFkUGIcI78R1stUUch_GfBXZsyg7aVyH2wxm9lKsFB2wK3qDgpd0NiBoT-ZsTrwzlbwvCFHhMp9rh83D4kZIPPdbp5yoA_06L0Zr4fNq3S328G8a8DtboJFkmxqG2T1yyVE2wLIoR3b8J3ckWTlT_VY2CCx8RjsstoTrkL8e9G5ZGa6sksMb93ugautin7GKz-nIz27pCr0h7g9BCoQWtL69mVC5xvVM3Z324vo5uVUPBi1bCG-ptpD9GWQ4exOBk9fJvGo-vRg"
 photologo = 'https://i.ibb.co/bRDX5bH0/Gemini-Generated-Image-ivpotqivpotqivpo.png'
 photoyt = 'https://i.ibb.co/bRDX5bH0/Gemini-Generated-Image-ivpotqivpotqivpo.png'
 photocp = 'https://i.ibb.co/bRDX5bH0/Gemini-Generated-Image-ivpotqivpotqivpo.png'
@@ -396,6 +401,55 @@ async def send_logs(client: Client, m: Message):
             await sent.delete()
     except Exception as e:
         await m.reply_text(f"**Error sending logs:**\n<blockquote>{e}</blockquote>")
+
+
+# ============================================================
+#  🆕 NEW COMMAND: /add_course
+# ============================================================
+@bot.on_message(filters.command("add_course") & auth_filter)
+async def add_course_command(client: Client, message: Message):
+    """Starts the process to add a course and upload its videos."""
+    await message.reply_text(
+        "📤 **Course Add Karne Ke Liye:**\n\n"
+        "1️⃣ Pehle **JSON File** bhejo (jisme course data ho).\n"
+        "2️⃣ Phir **Auth String** bhejo (jo encrypted ho).\n\n"
+        "**Process:** JSON → Auth → Video Upload"
+    )
+    
+    # Step 1: Wait for JSON file
+    try:
+        json_msg = await client.listen(message.chat.id, timeout=60)
+    except asyncio.TimeoutError:
+        await message.reply_text("❌ Timeout! Please try again.")
+        return
+    
+    if not json_msg.document:
+        await message.reply_text("❌ Invalid file. Please send a JSON document.")
+        return
+    
+    # Download the JSON file
+    json_path = await json_msg.download()
+    await message.reply_text("✅ JSON Received! Please send the Auth String now.")
+    
+    # Step 2: Wait for Auth String
+    try:
+        auth_msg = await client.listen(message.chat.id, timeout=60)
+    except asyncio.TimeoutError:
+        await message.reply_text("❌ Timeout! Please try again.")
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        return
+    
+    auth_string = auth_msg.text.strip()
+    
+    if not auth_string:
+        await message.reply_text("❌ Invalid auth string. Please send a valid encrypted string.")
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        return
+    
+    # Step 3: Process the course and videos
+    await process_course_and_upload(client, message, json_path, auth_string)
 
 
 # ============================================================
