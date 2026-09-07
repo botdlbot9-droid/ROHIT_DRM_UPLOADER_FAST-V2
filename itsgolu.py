@@ -1,3 +1,5 @@
+# itsgolu.py / utils.py (Complete Updated Code)
+
 import os
 import re
 import time
@@ -318,6 +320,190 @@ def vid_info(info):
 
 
 # ============================================================
+#  🔥 NEW: PW Video Downloader (Direct m3u8/MPD support)
+# ============================================================
+async def download_pw_video(url, name, quality="720"):
+    """
+    Specialized downloader for PW videos using direct MPD/m3u8 links.
+    Uses yt-dlp with optimal settings for DASH/HLS streams.
+    """
+    try:
+        print(f"🎬 Downloading PW video: {name}")
+        print(f"🔗 URL: {url[:150]}...")
+        
+        # Check if URL is valid
+        if not url or url.startswith('error'):
+            raise Exception(f"Invalid URL: {url}")
+        
+        # ============================================================
+        #  METHOD 1: Try direct ffmpeg download (most reliable)
+        # ============================================================
+        try:
+            print("🔄 Trying ffmpeg direct download...")
+            ffmpeg_cmd = f'ffmpeg -y -i "{url}" -c copy -bsf:a aac_adtstoasc -movflags +faststart "{name}.mp4" 2>&1'
+            
+            process = await asyncio.create_subprocess_shell(
+                ffmpeg_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
+                file_size = os.path.getsize(f'{name}.mp4')
+                if file_size > 1000:  # At least 1KB
+                    print(f"✅ ffmpeg download successful: {file_size} bytes")
+                    return f'{name}.mp4'
+                else:
+                    os.remove(f'{name}.mp4')
+        except Exception as e:
+            print(f"⚠️ ffmpeg failed: {e}")
+        
+        # ============================================================
+        #  METHOD 2: Try yt-dlp with multiple format options
+        # ============================================================
+        format_options = [
+            f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
+            'bestvideo+bestaudio/best',
+            'best',
+            'bestvideo[height<=720]+bestaudio',
+            'bestvideo+besta',
+            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        ]
+        
+        for fmt in format_options:
+            try:
+                print(f"🔄 Trying yt-dlp format: {fmt}")
+                
+                cmd = [
+                    'yt-dlp',
+                    '-f', fmt,
+                    '--merge-output-format', 'mp4',
+                    '--allow-unplayable-format',
+                    '--no-check-certificate',
+                    '--concurrent-fragments', '10',
+                    '--retries', '25',
+                    '--fragment-retries', '25',
+                    '--http-chunk-size', '10M',
+                    '--buffer-size', '16K',
+                    '--no-warnings',
+                    '-o', f'{name}.mp4',
+                    url
+                ]
+                
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0:
+                    if os.path.exists(f'{name}.mp4'):
+                        file_size = os.path.getsize(f'{name}.mp4')
+                        if file_size > 1000:
+                            print(f"✅ yt-dlp successful with format {fmt}: {file_size} bytes")
+                            return f'{name}.mp4'
+                        else:
+                            os.remove(f'{name}.mp4')
+                    elif os.path.exists(f'{name}.mkv'):
+                        # Rename if mkv
+                        os.rename(f'{name}.mkv', f'{name}.mp4')
+                        return f'{name}.mp4'
+                else:
+                    error_msg = stderr.decode() if stderr else ''
+                    if 'requested format' in error_msg.lower():
+                        continue
+                    print(f"⚠️ Format {fmt} failed: {error_msg[:150]}")
+                    continue
+                    
+            except Exception as e:
+                print(f"⚠️ Error with format {fmt}: {e}")
+                continue
+        
+        # ============================================================
+        #  METHOD 3: Try without format selection (yt-dlp default)
+        # ============================================================
+        try:
+            print("🔄 Trying yt-dlp default format...")
+            cmd = [
+                'yt-dlp',
+                '--merge-output-format', 'mp4',
+                '--allow-unplayable-format',
+                '--no-check-certificate',
+                '--no-warnings',
+                '-o', f'{name}.mp4',
+                url
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
+                file_size = os.path.getsize(f'{name}.mp4')
+                if file_size > 1000:
+                    print(f"✅ Default yt-dlp successful: {file_size} bytes")
+                    return f'{name}.mp4'
+        except Exception as e:
+            print(f"⚠️ Default yt-dlp failed: {e}")
+        
+        # ============================================================
+        #  METHOD 4: Try with aria2c external downloader
+        # ============================================================
+        try:
+            print("🔄 Trying yt-dlp with aria2c...")
+            cmd = [
+                'yt-dlp',
+                '-f', 'best',
+                '--merge-output-format', 'mp4',
+                '--allow-unplayable-format',
+                '--no-check-certificate',
+                '--external-downloader', 'aria2c',
+                '--downloader-args', 'aria2c:-x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error',
+                '-o', f'{name}.mp4',
+                url
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
+                return f'{name}.mp4'
+        except Exception as e:
+            print(f"⚠️ yt-dlp with aria2c failed: {e}")
+        
+        # ============================================================
+        #  CHECK FOR ANY DOWNLOADED FILE
+        # ============================================================
+        base_name = name.replace('.mp4', '').replace('.mkv', '').replace('.webm', '')
+        for ext in ['.mp4', '.mkv', '.webm', '.ts']:
+            if os.path.exists(f'{base_name}{ext}'):
+                return f'{base_name}{ext}'
+            if os.path.exists(f'{name}{ext}'):
+                return f'{name}{ext}'
+        
+        # Check current directory for any matching file
+        for ext in ['.mp4', '.mkv', '.webm', '.ts']:
+            for file in os.listdir('.'):
+                if file.startswith(base_name) and file.endswith(ext):
+                    return file
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ PW video download error: {e}")
+        return None
+
+
+# ============================================================
 #  🔥 UPDATED: decrypt_and_merge_video with FULL Akamai support
 #  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
 # ============================================================
@@ -549,60 +735,82 @@ async def fast_download(url, name):
 
 
 # ============================================================
-#  🔥 UPDATED: download_video with Akamai support
-#  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
+#  🔥 UPDATED: download_video with PW video detection
 # ============================================================
 async def download_video(url, cmd, name):
     retry_count = 0
-    max_retries = 2
-
-    # ============================================================
-    #  CHECK FOR AKAMAI AND PRESERVE PARAMETERS
-    # ============================================================
-    is_akamai = 'akamai' in url or 'hdntl' in url or 'hdnts' in url
-    is_hdntl = 'hdntl=' in url
+    max_retries = 3
     
-    if is_akamai:
-        print(f"✅ Akamai download detected, preserving all parameters")
-        if is_hdntl:
-            print(f"🔄 hdntl link detected - using direct URL with all parameters")
+    # ============================================================
+    #  DETECT PW VIDEO (has childId, parentId, or specific domains)
+    # ============================================================
+    is_pw_video = (
+        'childId' in url or 
+        'parentId' in url or 
+        'd1d34p8vz63oiq.cloudfront.net' in url or
+        'pw-vid-url' in url or
+        'penpencil' in url or
+        'quiz-book.workers.dev' in url
+    )
     
-    # For Akamai, add additional headers
-    headers_cmd = ''
-    if is_akamai:
-        headers_cmd = '--add-header "Referer:https://classplusapp.com/" --add-header "Origin:https://classplusapp.com"'
-
+    if is_pw_video:
+        print("🎯 PW video detected, using specialized downloader")
+        result = await download_pw_video(url, name, quality="720")
+        if result:
+            return result
+        # If specialized fails, fall through to normal method
+    
+    # ============================================================
+    #  NORMAL DOWNLOAD (with improved retry logic)
+    # ============================================================
     while retry_count < max_retries:
-        if "m3u8" in url or "mpd" in url:
-            download_cmd = f'{cmd} -R 25 --fragment-retries 25 --no-check-certificate --concurrent-fragments 10 {headers_cmd}'
-        else:
-            download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error" {headers_cmd}'
-        
-        print(f"⬇️ Running: {download_cmd}")
-        logging.info(download_cmd)
+        try:
+            # Modified command for better compatibility
+            if "m3u8" in url or "mpd" in url:
+                download_cmd = f'{cmd} -R 25 --fragment-retries 25 --no-check-certificate --concurrent-fragments 10 --allow-unplayable-format --http-chunk-size 10M'
+            else:
+                download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error"'
+            
+            print(f"⬇️ Running: {download_cmd}")
+            logging.info(download_cmd)
 
-        k = await run(download_cmd)
+            k = await run(download_cmd)
 
-        if k is not False:
-            break
+            if k is not False:
+                break
+
+        except Exception as e:
+            print(f"⚠️ Download attempt {retry_count + 1} failed: {e}")
 
         retry_count += 1
         print(f"⚠️ Download failed (attempt {retry_count}/{max_retries}), retrying in 5s...")
         await asyncio.sleep(5)
 
+    # ============================================================
+    #  FIND DOWNLOADED FILE
+    # ============================================================
     try:
-        if os.path.isfile(name):
-            return name
-        elif os.path.isfile(f"{name}.webm"):
-            return f"{name}.webm"
-        name_base = name.split(".")[0]
-        for ext in [".mkv", ".mp4", ".mp4.webm"]:
-            if os.path.isfile(f"{name_base}{ext}"):
-                return f"{name_base}{ext}"
-        return name + ".mp4"
+        # Check for common extensions
+        base_name = name.replace('.mp4', '').replace('.mkv', '').replace('.webm', '')
+        
+        for ext in ['.mp4', '.mkv', '.webm', '.ts']:
+            if os.path.exists(f"{base_name}{ext}"):
+                return f"{base_name}{ext}"
+            if os.path.exists(f"{name}{ext}"):
+                return f"{name}{ext}"
+        
+        # Check in current directory
+        for ext in ['.mp4', '.mkv', '.webm', '.ts']:
+            for file in os.listdir('.'):
+                if file.startswith(base_name) and file.endswith(ext):
+                    return file
+        
+        # Return default
+        return f"{name}.mp4"
+        
     except Exception as exc:
         logging.error(f"Error checking file: {exc}")
-        return name
+        return f"{name}.mp4"
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, channel_id, watermark="𝐈𝐓'𝐬𝐆𝐎𝐋𝐔", topic_thread_id: int = None):
