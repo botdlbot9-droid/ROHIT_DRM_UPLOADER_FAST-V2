@@ -325,21 +325,24 @@ def vid_info(info):
 async def download_pw_video(url, name, quality="720"):
     """
     Specialized downloader for PW videos using direct m3u8 links.
+    Downloads in 720p quality by default.
     """
     try:
         print(f"🎬 Downloading PW video: {name}")
         print(f"🔗 URL: {url[:150]}...")
+        print(f"📺 Quality: {quality}p")
         
         if not url or not url.startswith('http'):
             raise Exception(f"Invalid URL: {url}")
         
         # ============================================================
-        #  METHOD 1: yt-dlp (preferred)
+        #  METHOD 1: yt-dlp with quality preference
         # ============================================================
         format_options = [
-            'best',
-            'bestvideo+bestaudio',
+            f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
             'bestvideo[height<=720]+bestaudio/best[height<=720]/best',
+            'bestvideo+bestaudio',
+            'best',
         ]
         
         for fmt in format_options:
