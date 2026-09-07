@@ -80,9 +80,13 @@ async def process_course_and_upload(client: Client, message: Message, json_path:
             course_data = json.load(f)
         
         # 2. Decrypt Auth String
-        auth_data = await decrypt_auth_string(auth_string)
-        token = auth_data.get('token')
-        random_id = auth_data.get('randomId')
+        try:
+            auth_data = await decrypt_auth_string(auth_string)
+            token = auth_data.get('token')
+            random_id = auth_data.get('randomId')
+        except Exception as e:
+            await message.reply_text(f"❌ Decryption failed: {str(e)}")
+            return
         
         if not token or not random_id:
             raise ValueError("Auth decryption failed: Missing token or randomId.")
