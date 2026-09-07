@@ -367,7 +367,7 @@ async def unauthorized_handler(client, message: Message):
         "<b>Mʏ Nᴀᴍᴇ [DRM UPLODER 🦋](https://t.me/rohit46788)</b>\n\n"
         "<blockquote>You need to have an active subscription to use this bot.\n"
         "Please contact admin to get premium access.</blockquote>",
-        reply_markup=InlineKeyboardMarkup([[
+        reply_markup=InlineKeyboardMarkup([[        
             InlineKeyboardButton("💫 Get Premium Access", url="https://t.me/rohit46788")
         ]])
     )
@@ -934,9 +934,9 @@ async def txt_handler(bot: Client, m: Message):
                     keys_string = ""
 
             # ============================================================
-            #  🆕 UPDATED: CLASSPLUS / AKAMAI LOGIC
+            #  🆕 UPDATED: CLASSPX SUPPORT WITH keys_string FIX
             # ============================================================
-            elif "https://static-trans-v1.classx.co.in" in url or "https://static-trans-v2.classx.co.in" in url or "transcoded-videos.classx.co.in" in url:
+            elif "https://static-trans-v1.classx.co.in" in url or "https://static-trans-v2.classx.co.in" in url or "transcoded-videos.classx.co.in" in url or "classx.co.in" in url:
                 # Pehle '*' se signature alag karein
                 if "*" in url:
                     base_with_params, signature = url.split("*")
@@ -951,7 +951,7 @@ async def txt_handler(bot: Client, m: Message):
                 elif ".m3u8" in base_with_params:
                     base_clean = base_with_params.split(".m3u8")[0] + ".m3u8"
                 else:
-                    base_clean = base_with_params  # Agar koi extension nahi hai toh original rakhein
+                    base_clean = base_with_params
                 
                 # Domain ko Akamai CDN se replace karein
                 if "static-trans-v1.classx.co.in" in url or "transcoded-videos.classx.co.in" in url:
@@ -965,17 +965,22 @@ async def txt_handler(bot: Client, m: Message):
                     url = f"{base_clean}*{signature}"
                 else:
                     url = base_clean
+                
+                # ✅ IMPORTANT: keys_string ko define karein (ClassX ke liye usually empty hota hai)
+                keys_string = ""
             
             elif "https://static-rec.classx.co.in/drm/" in url:
                 base_with_params, signature = url.split("*")
                 base_clean = base_with_params.split("?")[0]
                 base_clean = base_clean.replace("https://static-rec.classx.co.in", "https://appx-recordings-mcdn.akamai.net.in")
                 url = f"{base_clean}*{signature}"
+                keys_string = ""
 
             elif "https://static-wsb.classx.co.in/" in url:
                 clean_url = url.split("?")[0]
                 clean_url = clean_url.replace("https://static-wsb.classx.co.in", "https://appx-wsb-gcp-mcdn.akamai.net.in")
                 url = clean_url
+                keys_string = ""
 
             elif "https://static-db.classx.co.in/" in url:
                 if "*" in url:
@@ -986,6 +991,7 @@ async def txt_handler(bot: Client, m: Message):
                 else:
                     base_url = url.split("?")[0]
                     url = base_url.replace("https://static-db.classx.co.in", "https://appxcontent.kaxa.in")
+                keys_string = ""
 
             elif "https://static-db-v2.classx.co.in/" in url:
                 if "*" in url:
@@ -996,6 +1002,7 @@ async def txt_handler(bot: Client, m: Message):
                 else:
                     base_url = url.split("?")[0]
                     url = base_url.replace("https://static-db-v2.classx.co.in", "https://appx-content-v2.classx.co.in")
+                keys_string = ""
 
                 user_id = m.from_user.id
 
