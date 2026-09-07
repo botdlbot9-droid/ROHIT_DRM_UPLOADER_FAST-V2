@@ -46,7 +46,7 @@ Flask
 gunicorn
 itsdangerous
 
-yt-dlp==2023.12.30
+
 aiofiles==23.2.1
 
 
