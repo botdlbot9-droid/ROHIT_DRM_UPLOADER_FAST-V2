@@ -67,7 +67,6 @@ from html_handler import html_handler
 from itsgolu import *
 
 from clean import register_clean_handler
-from logs import logging
 from utils import progress_bar
 from vars import *
 
@@ -355,16 +354,18 @@ async def start(bot: Client, m: Message):
 
 def auth_check_filter(_, client, message):
     try:
+        username = client.me.username if (client and client.me) else ""
         if message.chat.type == "channel":
-            return db.is_channel_authorized(message.chat.id, client.me.username)
+            return db.is_channel_authorized(message.chat.id, username)
         else:
-            return db.is_user_authorized(message.from_user.id, client.me.username)
+            user_id = message.from_user.id if message.from_user else message.chat.id
+            return db.is_user_authorized(user_id, username)
     except Exception:
         return False
 
 auth_filter = filters.create(auth_check_filter)
 
-@bot.on_message(~auth_filter & filters.private & filters.command)
+@bot.on_message(~auth_filter & filters.private & filters.regex(r"^/") & ~filters.command("start"))
 async def unauthorized_handler(client, message: Message):
     await message.reply(
         "<b>Mʏ Nᴀᴍᴇ [DRM UPLODER 🦋](https://t.me/rohit46788)</b>\n\n"
@@ -389,6 +390,7 @@ async def call_html_handler(bot: Client, message: Message):
 
 @bot.on_message(filters.command(["logs"]) & auth_filter)
 async def send_logs(client: Client, m: Message):
+    bot_username = client.me.username if (client and client.me) else "ITsGOLU_UPLOADER"
     if m.chat.type == "channel":
         if not db.is_channel_authorized(m.chat.id, bot_username):
             return
@@ -443,7 +445,8 @@ async def add_course_command(client: Client, message: Message):
     
     # Pre-parse JSON for metadata & batch name detection
     detected_batch = None
-    lecture_count = 0
+    video_count = 0
+    pdf_count = 0
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             c_data = json.load(f)
@@ -452,19 +455,56 @@ async def add_course_command(client: Client, message: Message):
                 or c_data.get('batch_name')
                 or c_data.get('name')
             )
-            # Quick lecture counter
-            for subject in c_data.get('subjects', []):
-                for topic in subject.get('topics', []):
-                    lecture_count += len(topic.get('lectures', []))
-            if lecture_count == 0:
-                lecture_count = len(c_data.get('lectures', []))
+            
+            def count_item(item):
+                nonlocal video_count, pdf_count
+                if not isinstance(item, dict):
+                    return
+                u_str = str(item.get('url') or item.get('videoUrl') or item.get('link') or item.get('attachment') or item.get('attachmentUrl') or '')
+                t_str = str(item.get('type') or '').upper()
+                if '.pdf' in u_str.lower() or t_str in ['NOTES', 'PDF', 'DOCUMENT', 'ASSIGNMENT', 'DPP_PDF']:
+                    pdf_count += 1
+                elif item.get('videoId') or item.get('video_id') or item.get('childId') or any(k in u_str.lower() for k in ['.mpd', '.m3u8', 'http']):
+                    video_count += 1
+                
+                # Check for secondary attached PDF notes
+                att = str(item.get('attachment') or item.get('attachmentUrl') or '')
+                if '.pdf' in att.lower() and att != u_str:
+                    pdf_count += 1
+
+            if 'subjects' in c_data and isinstance(c_data['subjects'], list):
+                for sub in c_data['subjects']:
+                    for top in sub.get('topics', []):
+                        for lec in top.get('lectures', []):
+                            count_item(lec)
+                        for note in top.get('notes', []):
+                            count_item(note)
+                        for doc in top.get('documents', []):
+                            count_item(doc)
+                        for dpp in top.get('dpps', []):
+                            count_item(dpp)
+            elif 'lectures' in c_data and isinstance(c_data['lectures'], list):
+                for lec in c_data['lectures']:
+                    count_item(lec)
+                for note in c_data.get('notes', []):
+                    count_item(note)
+                for doc in c_data.get('documents', []):
+                    count_item(doc)
+            elif isinstance(c_data, list):
+                for itm in c_data:
+                    count_item(itm)
     except Exception:
         pass
 
+    total_content = video_count + pdf_count
     json_info = (
-        "✅ **JSON Loaded Successfully!**\n"
-        f"├ 📚 **Detected Batch:** `{detected_batch or 'Found'}`\n"
-        f"└ 📽️ **Lectures Found:** `{lecture_count or 'Ready'}`\n\n"
+        "╔══════════════════════════════════╗\n"
+        "   ✅ **COURSE JSON LOADED!**\n"
+        "╚══════════════════════════════════╝\n\n"
+        f"📚 **Batch:** `{detected_batch or 'Detected'}`\n"
+        f"📽️ **MPD / Video Streams:** `{video_count}`\n"
+        f"📄 **Notes / PDFs:** `{pdf_count}`\n"
+        f"📦 **Total Items:** `{total_content}`\n\n"
         "🔑 **Step 2:** Now please send the **Encrypted Auth String**:"
     )
     await message.reply_text(json_info)
