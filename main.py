@@ -42,6 +42,9 @@ from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove,
     InputMediaPhoto
 )
 from pyrogram.errors import (
@@ -408,93 +411,192 @@ async def send_logs(client: Client, m: Message):
 # ============================================================
 @bot.on_message(filters.command("add_course") & auth_filter)
 async def add_course_command(client: Client, message: Message):
-    """Starts the process to add a course and upload its videos."""
+    """Starts the process to add a course and upload its videos with modern interactive UI."""
     user_id = message.from_user.id
-    await message.reply_text(
-        "📤 **Course Add Karne Ke Liye:**\n\n"
-        "1️⃣ Pehle **JSON File** bhejo (jisme course data ho).\n"
-        "2️⃣ Phir **Auth String** bhejo (jo encrypted ho).\n\n"
-        "**Process:** JSON → Auth → Resolution → Batch Name → Channel ID → Video Upload"
+    
+    welcome_card = (
+        "╔══════════════════════════════════╗\n"
+        "   ⚡ **PW COURSE AUTO-UPLOADER V2.0** ⚡\n"
+        "╚══════════════════════════════════╝\n\n"
+        "📌 **Step-by-Step Wizard:**\n"
+        "├ 1️⃣ Send **JSON File** (Course data)\n"
+        "├ 2️⃣ Send **Auth String** (Encrypted key)\n"
+        "├ 3️⃣ Select **Quality** (Button selection)\n"
+        "├ 4️⃣ Confirm **Batch Name** (Auto-detected)\n"
+        "└ 5️⃣ Target **Channel ID** (Or Current Chat)\n\n"
+        "📥 **Step 1:** Please send your **Course JSON file** now:"
     )
+    await message.reply_text(welcome_card)
     
     # Step 1: Wait for JSON file
     try:
-        json_msg = await client.listen(message.chat.id, timeout=60)
+        json_msg = await client.listen(message.chat.id, timeout=90)
     except asyncio.TimeoutError:
-        await message.reply_text("❌ Timeout! Please try again.")
+        await message.reply_text("❌ **Timeout!** Please run /add_course again.")
         return
     
     if not json_msg.document:
-        await message.reply_text("❌ Invalid file. Please send a JSON document.")
+        await message.reply_text("❌ **Invalid file!** Please upload a valid JSON document.")
         return
     
     json_path = await json_msg.download()
-    await message.reply_text("✅ JSON Received! Please send the Auth String now.")
+    
+    # Pre-parse JSON for metadata & batch name detection
+    detected_batch = None
+    lecture_count = 0
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            c_data = json.load(f)
+            detected_batch = (
+                c_data.get('batch', {}).get('name')
+                or c_data.get('batch_name')
+                or c_data.get('name')
+            )
+            # Quick lecture counter
+            for subject in c_data.get('subjects', []):
+                for topic in subject.get('topics', []):
+                    lecture_count += len(topic.get('lectures', []))
+            if lecture_count == 0:
+                lecture_count = len(c_data.get('lectures', []))
+    except Exception:
+        pass
+
+    json_info = (
+        "✅ **JSON Loaded Successfully!**\n"
+        f"├ 📚 **Detected Batch:** `{detected_batch or 'Found'}`\n"
+        f"└ 📽️ **Lectures Found:** `{lecture_count or 'Ready'}`\n\n"
+        "🔑 **Step 2:** Now please send the **Encrypted Auth String**:"
+    )
+    await message.reply_text(json_info)
     
     # Step 2: Wait for Auth String
     try:
-        auth_msg = await client.listen(message.chat.id, timeout=60)
+        auth_msg = await client.listen(message.chat.id, timeout=90)
     except asyncio.TimeoutError:
-        await message.reply_text("❌ Timeout! Please try again.")
+        await message.reply_text("❌ **Timeout!** Please try again.")
         if os.path.exists(json_path):
             os.remove(json_path)
         return
     
-    auth_string = auth_msg.text.strip()
+    auth_string = auth_msg.text.strip() if auth_msg.text else ""
     if not auth_string:
-        await message.reply_text("❌ Invalid auth string.")
+        await message.reply_text("❌ **Invalid Auth String!**")
         if os.path.exists(json_path):
             os.remove(json_path)
         return
 
-    # Step 3: Ask for Resolution
+    # Step 3: Ask for Resolution with Reply Keyboard
+    quality_kb = ReplyKeyboardMarkup(
+        [
+            ["🎬 720p HD", "🎬 480p Standard"],
+            ["🎬 360p Saver", "🎬 1080p FHD"]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
     res_msg = await message.reply_text(
-        "🎞️ **Select Video Quality:**\n\n"
-        "Send:\n"
-        "`240` - 240p\n"
-        "`360` - 360p\n"
-        "`480` - 480p\n"
-        "`720` - 720p"
+        "🎞️ **Select Video Quality:**\n\nTap a button below or type resolution (`240`, `360`, `480`, `720`, `1080`):",
+        reply_markup=quality_kb
     )
     try:
-        quality_msg = await client.listen(message.chat.id, timeout=30)
-        quality = quality_msg.text.strip()
-        if quality not in ['240', '360', '480', '720']:
-            await message.reply_text("❌ Invalid quality! Using default 720p.")
-            quality = '720'
+        quality_msg = await client.listen(message.chat.id, timeout=45)
+        raw_q = quality_msg.text.strip() if quality_msg.text else "720"
+        if "1080" in raw_q:
+            quality = "1080"
+        elif "480" in raw_q:
+            quality = "480"
+        elif "360" in raw_q:
+            quality = "360"
+        elif "240" in raw_q:
+            quality = "240"
+        else:
+            quality = "720"
     except asyncio.TimeoutError:
-        quality = '720'
-        await message.reply_text("⏳ Timeout! Using default 720p.")
+        quality = "720"
+        await message.reply_text("⏳ Timeout! Defaulting to 720p HD.")
     finally:
-        await res_msg.delete()
+        try:
+            await res_msg.delete()
+        except Exception:
+            pass
 
     # Step 4: Ask for Batch Name
-    await message.reply_text("📛 **Enter Batch Name:**\n(Example: Physics Wallah - Batch 2026)")
-    try:
-        batch_name_msg = await client.listen(message.chat.id, timeout=30)
-        batch_name = batch_name_msg.text.strip()
-        if not batch_name:
-            batch_name = "Unknown Batch"
-    except asyncio.TimeoutError:
-        batch_name = "Unknown Batch"
-        await message.reply_text("⏳ Timeout! Using 'Unknown Batch'.")
+    if detected_batch:
+        batch_kb = ReplyKeyboardMarkup(
+            [
+                [f"✅ Use: {detected_batch[:35]}"],
+                ["✏️ Custom Name"]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        batch_prompt = (
+            f"📛 **Confirm Batch Name:**\n\n"
+            f"Detected: **{detected_batch}**\n\n"
+            "Tap button to accept or send your own custom batch name:"
+        )
+    else:
+        batch_kb = None
+        batch_prompt = "📛 **Enter Batch Name:**\n(Example: `Physics Wallah - MCA 2026`)"
 
-    # Step 5: Ask for Channel ID
-    await message.reply_text(
-        "📢 **Enter Channel/Group ID where videos should be uploaded:**\n"
-        "(Example: `-1001234567890`)\n\n"
-        "⚠️ **Make sure bot is admin in that group/channel!**"
-    )
+    batch_msg = await message.reply_text(batch_prompt, reply_markup=batch_kb)
     try:
-        channel_msg = await client.listen(message.chat.id, timeout=30)
-        channel_id_str = channel_msg.text.strip()
-        channel_id = int(channel_id_str)
+        batch_name_msg = await client.listen(message.chat.id, timeout=45)
+        b_input = batch_name_msg.text.strip() if batch_name_msg.text else ""
+        if "✅ Use:" in b_input and detected_batch:
+            batch_name = detected_batch
+        elif b_input and b_input != "✏️ Custom Name":
+            batch_name = b_input
+        else:
+            batch_name = detected_batch or "Unknown Batch"
+    except asyncio.TimeoutError:
+        batch_name = detected_batch or "Unknown Batch"
+        await message.reply_text(f"⏳ Timeout! Using '{batch_name}'.")
+    finally:
+        try:
+            await batch_msg.delete()
+        except Exception:
+            pass
+
+    # Step 5: Ask for Target Channel ID
+    channel_kb = ReplyKeyboardMarkup(
+        [
+            ["📍 Upload to Current Chat"]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    chan_prompt = (
+        "📢 **Enter Target Channel / Group ID:**\n\n"
+        "• Tap **Upload to Current Chat**\n"
+        "• OR send Channel ID (e.g. `-1001234567890`)\n\n"
+        "⚠️ *Make sure the bot is Admin in that channel with post permissions!*"
+    )
+    chan_msg = await message.reply_text(chan_prompt, reply_markup=channel_kb)
+    try:
+        channel_msg = await client.listen(message.chat.id, timeout=45)
+        raw_c = channel_msg.text.strip() if channel_msg.text else ""
+        if "Current Chat" in raw_c:
+            channel_id = message.chat.id
+        else:
+            channel_id = int(raw_c)
     except asyncio.TimeoutError:
         channel_id = message.chat.id
-        await message.reply_text(f"⏳ Timeout! Using current chat: `{channel_id}`")
+        await message.reply_text(f"⏳ Timeout! Uploading to current chat: `{channel_id}`")
     except ValueError:
         channel_id = message.chat.id
-        await message.reply_text(f"❌ Invalid ID! Using current chat: `{channel_id}`")
+        await message.reply_text(f"❌ Invalid ID format! Uploading to current chat: `{channel_id}`")
+    finally:
+        try:
+            await chan_msg.delete()
+        except Exception:
+            pass
+
+    # Clear custom keyboard
+    await message.reply_text(
+        "🚀 **Setup Complete! Initializing Course Uploader Engine...**",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
     # Step 6: Process the course with all parameters
     await process_course_and_upload(
