@@ -385,7 +385,39 @@ class Database:
 
         except Exception as e:
             print(f"{Fore.RED}Cleanup error: {str(e)}{Style.RESET_ALL}")
-            return 0
+    def update_video_status(self, video_id: str, status: str, file_path: str = None):
+        """Update video download/upload status in MongoDB"""
+        try:
+            if self.db is not None:
+                self.db['videos'].update_one(
+                    {'video_id': str(video_id)},
+                    {'$set': {'status': status, 'file_path': file_path, 'updated_at': datetime.now()}},
+                    upsert=True
+                )
+        except Exception as e:
+            pass
+
+    def add_video(self, video_id: str, data: dict):
+        """Add new video record to MongoDB"""
+        try:
+            if self.db is not None:
+                doc = dict(data)
+                doc['video_id'] = str(video_id)
+                doc['created_at'] = datetime.now()
+                self.db['videos'].update_one({'video_id': str(video_id)}, {'$set': doc}, upsert=True)
+        except Exception as e:
+            pass
+
+    def mark_video_completed(self, video_id: str):
+        """Mark video as completed in MongoDB"""
+        try:
+            if self.db is not None:
+                self.db['videos'].update_one(
+                    {'video_id': str(video_id)},
+                    {'$set': {'completed': True, 'completed_at': datetime.now()}}
+                )
+        except Exception as e:
+            pass
 
     def get_user_expiry_info(self, user_id: int, bot_username: str = "ITsGOLU_UPLOADER") -> Optional[dict]:
         """
