@@ -83,7 +83,6 @@ def extract_master_m3u8_from_playlist(m3u8_content: str) -> str:
             return m3u8_url
         
         # Method 3: Build from base URL
-        # Extract base domain and path
         domain_pattern = r'(https?://[^/]+)/([^/]+)/([^/]+)/hls/'
         domain_match = re.search(domain_pattern, m3u8_content)
         
@@ -103,7 +102,7 @@ def extract_master_m3u8_from_playlist(m3u8_content: str) -> str:
         return None
 
 # ============================================================
-#  🔥 GET PLAYIST CONTENT AND EXTRACT MASTER M3U8
+#  🔥 GET PLAYLIST CONTENT AND EXTRACT MASTER M3U8
 # ============================================================
 async def get_master_m3u8_from_api(video_url: str) -> str:
     """
@@ -118,7 +117,6 @@ async def get_master_m3u8_from_api(video_url: str) -> str:
                     content = await response.text()
                     print(f"📄 Playlist content length: {len(content)} bytes")
                     
-                    # Extract master.m3u8 URL
                     master_url = extract_master_m3u8_from_playlist(content)
                     
                     if master_url:
@@ -136,14 +134,13 @@ async def get_master_m3u8_from_api(video_url: str) -> str:
         return video_url
 
 # ============================================================
-#  🔥 DOWNLOAD VIA ASMULTIVERSE API
+#  🔥 DOWNLOAD VIA ASMULTIVERSE API (FIXED - NO TIMEOUT)
 # ============================================================
 async def download_via_asmultiverse(video_url: str, name: str) -> str:
     """
     Download video using asmultiverse API
     """
     try:
-        # Encode the video URL
         encoded_url = requests.utils.quote(video_url, safe='')
         download_url = f"https://download.asmultiverse.com?Vurl={encoded_url}"
         
@@ -151,7 +148,6 @@ async def download_via_asmultiverse(video_url: str, name: str) -> str:
         
         output_file = f"{name}.mp4"
         
-        # Use yt-dlp to download
         cmd = [
             'yt-dlp',
             '-f', 'best',
@@ -172,7 +168,9 @@ async def download_via_asmultiverse(video_url: str, name: str) -> str:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, stderr = await process.communicate(timeout=600)
+        
+        # ✅ FIX: No timeout in communicate()
+        stdout, stderr = await process.communicate()
         
         if process.returncode == 0 and os.path.exists(output_file):
             file_size = os.path.getsize(output_file)
@@ -187,6 +185,148 @@ async def download_via_asmultiverse(video_url: str, name: str) -> str:
     except Exception as e:
         print(f"❌ asmultiverse download error: {e}")
         return None
+
+# ============================================================
+#  🔥 DOWNLOAD WITH FFMPEG (FIXED - NO TIMEOUT)
+# ============================================================
+async def download_with_ffmpeg(video_url: str, name: str) -> str:
+    """
+    Download video using ffmpeg
+    """
+    try:
+        print("🔄 Trying ffmpeg direct download...")
+        
+        ffmpeg_cmd = (
+            f'ffmpeg -y '
+            f'-user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" '
+            f'-reconnect 1 '
+            f'-reconnect_streamed 1 '
+            f'-reconnect_delay_max 5 '
+            f'-i "{video_url}" '
+            f'-c copy '
+            f'-bsf:a aac_adtstoasc '
+            f'-movflags +faststart '
+            f'-err_detect ignore_err '
+            f'-max_muxing_queue_size 9999 '
+            f'-threads 4 '
+            f'"{name}.mp4"'
+        )
+        
+        process = await asyncio.create_subprocess_shell(
+            ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        # ✅ FIX: No timeout in communicate()
+        stdout, stderr = await process.communicate()
+        
+        if os.path.exists(f'{name}.mp4'):
+            file_size = os.path.getsize(f'{name}.mp4')
+            if file_size > 100000:
+                is_valid = await verify_video_integrity(f'{name}.mp4')
+                if is_valid:
+                    print(f"✅ ffmpeg successful: {file_size} bytes")
+                    return f'{name}.mp4'
+                else:
+                    os.remove(f'{name}.mp4')
+            else:
+                os.remove(f'{name}.mp4')
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ ffmpeg download error: {e}")
+        return None
+
+# ============================================================
+#  🔥 DOWNLOAD WITH YT-DLP (FIXED - NO TIMEOUT)
+# ============================================================
+async def download_with_ytdlp(video_url: str, name: str, quality: str = '720') -> str:
+    """
+    Download video using yt-dlp
+    """
+    try:
+        print("🔄 Trying yt-dlp...")
+        
+        cmd = [
+            'yt-dlp',
+            '-f', f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
+            '--merge-output-format', 'mp4',
+            '--allow-unplayable-format',
+            '--no-check-certificate',
+            '--concurrent-fragments', '10',
+            '--retries', '50',
+            '--fragment-retries', '50',
+            '--http-chunk-size', '5M',
+            '--buffer-size', '32K',
+            '--no-warnings',
+            '--no-cache-dir',
+            '--hls-prefer-ffmpeg',
+            '--downloader', 'ffmpeg',
+            '-o', f'{name}.mp4',
+            video_url
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        # ✅ FIX: No timeout in communicate()
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
+            file_size = os.path.getsize(f'{name}.mp4')
+            if file_size > 100000:
+                is_valid = await verify_video_integrity(f'{name}.mp4')
+                if is_valid:
+                    print(f"✅ yt-dlp successful: {file_size} bytes")
+                    return f'{name}.mp4'
+                else:
+                    os.remove(f'{name}.mp4')
+        
+        return None
+        
+    except Exception as e:
+        print(f"❌ yt-dlp download error: {e}")
+        return None
+
+# ============================================================
+#  🔥 VIDEO INTEGRITY VERIFICATION
+# ============================================================
+async def verify_video_integrity(file_path: str) -> bool:
+    """
+    Verify if video is complete and playable using ffprobe.
+    """
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            file_path
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate(timeout=30)
+        
+        if process.returncode == 0 and stdout:
+            duration = float(stdout.decode().strip())
+            if duration > 1:
+                print(f"✅ Video verified: {duration:.2f} seconds")
+                return True
+        
+        return False
+        
+    except Exception as e:
+        print(f"⚠️ Video verification failed: {e}")
+        return False
 
 # ============================================================
 #  🔥 MAIN DOWNLOAD FUNCTION (UPDATED)
@@ -230,85 +370,20 @@ async def download_pw_video(video_id: str, url: str, name: str, quality: str = '
         # ============================================================
         #  STEP 3: Fallback to ffmpeg direct download
         # ============================================================
-        print("🔄 Trying ffmpeg direct download...")
+        result = await download_with_ffmpeg(video_url_to_download, name)
         
-        ffmpeg_cmd = (
-            f'ffmpeg -y '
-            f'-user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" '
-            f'-reconnect 1 '
-            f'-reconnect_streamed 1 '
-            f'-reconnect_delay_max 5 '
-            f'-i "{video_url_to_download}" '
-            f'-c copy '
-            f'-bsf:a aac_adtstoasc '
-            f'-movflags +faststart '
-            f'-err_detect ignore_err '
-            f'-max_muxing_queue_size 9999 '
-            f'-threads 4 '
-            f'"{name}.mp4"'
-        )
-        
-        process = await asyncio.create_subprocess_shell(
-            ffmpeg_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate(timeout=600)
-        
-        if os.path.exists(f'{name}.mp4'):
-            file_size = os.path.getsize(f'{name}.mp4')
-            if file_size > 100000:
-                is_valid = await verify_video_integrity(f'{name}.mp4')
-                if is_valid:
-                    print(f"✅ ffmpeg successful: {file_size} bytes")
-                    db.update_video_status(video_id, 'downloaded', f'{name}.mp4')
-                    return f'{name}.mp4'
-                else:
-                    os.remove(f'{name}.mp4')
-            else:
-                os.remove(f'{name}.mp4')
+        if result:
+            db.update_video_status(video_id, 'downloaded', result)
+            return result
         
         # ============================================================
         #  STEP 4: Fallback to yt-dlp
         # ============================================================
-        print("🔄 Trying yt-dlp...")
+        result = await download_with_ytdlp(video_url_to_download, name, quality)
         
-        cmd = [
-            'yt-dlp',
-            '-f', f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
-            '--merge-output-format', 'mp4',
-            '--allow-unplayable-format',
-            '--no-check-certificate',
-            '--concurrent-fragments', '10',
-            '--retries', '50',
-            '--fragment-retries', '50',
-            '--http-chunk-size', '5M',
-            '--buffer-size', '32K',
-            '--no-warnings',
-            '--no-cache-dir',
-            '--hls-prefer-ffmpeg',
-            '--downloader', 'ffmpeg',
-            '-o', f'{name}.mp4',
-            video_url_to_download
-        ]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate(timeout=600)
-        
-        if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
-            file_size = os.path.getsize(f'{name}.mp4')
-            if file_size > 100000:
-                is_valid = await verify_video_integrity(f'{name}.mp4')
-                if is_valid:
-                    print(f"✅ yt-dlp successful: {file_size} bytes")
-                    db.update_video_status(video_id, 'downloaded', f'{name}.mp4')
-                    return f'{name}.mp4'
-                else:
-                    os.remove(f'{name}.mp4')
+        if result:
+            db.update_video_status(video_id, 'downloaded', result)
+            return result
         
         db.update_video_status(video_id, 'failed')
         return None
@@ -317,41 +392,6 @@ async def download_pw_video(video_id: str, url: str, name: str, quality: str = '
         print(f"❌ PW video download error: {e}")
         db.update_video_status(video_id, 'failed')
         return None
-
-# ============================================================
-#  🔥 VIDEO INTEGRITY VERIFICATION
-# ============================================================
-async def verify_video_integrity(file_path: str) -> bool:
-    """
-    Verify if video is complete and playable using ffprobe.
-    """
-    try:
-        cmd = [
-            'ffprobe',
-            '-v', 'error',
-            '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1',
-            file_path
-        ]
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate(timeout=30)
-        
-        if process.returncode == 0 and stdout:
-            duration = float(stdout.decode().strip())
-            if duration > 1:
-                print(f"✅ Video verified: {duration:.2f} seconds")
-                return True
-        
-        return False
-        
-    except Exception as e:
-        print(f"⚠️ Video verification failed: {e}")
-        return False
 
 # ============================================================
 #  🔥 DOWNLOAD AND UPLOAD WITH RETRY
