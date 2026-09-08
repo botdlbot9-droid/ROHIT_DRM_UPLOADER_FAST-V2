@@ -8,11 +8,45 @@ import glob
 import shutil
 import html
 import aiohttp
+import requests
+import urllib.parse
 from math import ceil
 from typing import Tuple, List, Optional, Dict, Any
 from pyrogram import Client
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
+
+try:
+    from db import db
+except ImportError:
+    try:
+        from ..db import db
+    except ImportError:
+        db = None
+
+
+def safe_db_add_video(video_id: str, data: dict):
+    try:
+        if db and hasattr(db, 'add_video'):
+            db.add_video(video_id, data)
+    except Exception:
+        pass
+
+
+def safe_db_update_video_status(video_id: str, status: str, file_path: str = None):
+    try:
+        if db and hasattr(db, 'update_video_status'):
+            db.update_video_status(video_id, status, file_path)
+    except Exception:
+        pass
+
+
+def safe_db_mark_video_completed(video_id: str):
+    try:
+        if db and hasattr(db, 'mark_video_completed'):
+            db.mark_video_completed(video_id)
+    except Exception:
+        pass
 
 try:
     import cloudscraper
@@ -25,7 +59,7 @@ except (ImportError, ValueError):
     from decryption_utils import decrypt_auth_string
 
 # Maximum retries for each video
-MAX_RETRIES = 3
+MAX_RETRIES = 5
 
 
 # ============================================================
@@ -200,13 +234,13 @@ async def generate_video_url(batch_id: str, video_id: str, token: str, random_id
     batch_clean = str(batch_id).strip()
     video_clean = str(video_id).strip()
 
-    # Try endpoints in order of reliability
     endpoints = [
-        f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_clean}&childId={video_clean}&token={token}&randomid={random_id}",
         f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_clean}&childId={video_clean}&quality={quality}&token={token}&randomid={random_id}",
-        #f"https://anonymouspwplayeer-2038df9c1dbd.herokuapp.com/pw?url=https://d1d34p8vz63oiq.cloudfront.net/{video_clean}/master.mpd&token={token}"
+        f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_clean}&childId={video_clean}&token={token}&randomid={random_id}",
+        f"https://anonymouspwplayeer-2038df9c1dbd.herokuapp.com/pw?url=https://d1d34p8vz63oiq.cloudfront.net/{video_clean}/master.mpd&token={token}"
     ]
 
+    print(f"📡 API Request: {endpoints[0][:150]}...")
     last_error = "Unknown error"
 
     for api_url in endpoints:
@@ -215,9 +249,11 @@ async def generate_video_url(batch_id: str, video_id: str, token: str, random_id
                 timeout = aiohttp.ClientTimeout(total=20)
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(api_url) as response:
+                        print(f"📡 Response Status: {response.status}")
                         if response.status == 200:
                             try:
                                 data = await response.json()
+                                print(f"📡 API Response: {data}")
                                 if isinstance(data, dict):
                                     v_url = data.get('url') or data.get('video_url') or data.get('stream_url')
                                     if v_url and str(v_url).startswith('http'):
@@ -242,6 +278,155 @@ async def generate_video_url(batch_id: str, video_id: str, token: str, random_id
                 await asyncio.sleep(1)
 
     raise Exception(f"API request failed after trying all endpoints: {last_error}")
+
+
+# ============================================================
+#  🔥 EXTRACT MASTER M3U8 URL FROM PLAYLIST
+# ============================================================
+def extract_master_m3u8_from_playlist(m3u8_content: str) -> Optional[str]:
+    """
+    Extract master.m3u8 URL from the M3U8 playlist content.
+    It finds the enc.key URL and replaces 'hls/enc.key' with 'master.m3u8'
+    """
+    try:
+        print("🔍 Extracting master.m3u8 URL from playlist...")
+
+        # Method 1: Find enc.key URL from #EXT-X-KEY line
+        key_pattern = r'URI="([^"]+enc\.key[^"]*)"'
+        key_match = re.search(key_pattern, m3u8_content)
+
+        if key_match:
+            enc_key_url = key_match.group(1)
+            print(f"🔑 Found enc.key URL: {enc_key_url[:100]}...")
+
+            # Replace 'hls/enc.key' with 'master.m3u8'
+            master_m3u8 = enc_key_url.replace('hls/enc.key', 'master.m3u8')
+            print(f"✅ Generated master.m3u8: {master_m3u8[:100]}...")
+            return master_m3u8
+
+        # Method 2: Try to find any .m3u8 URL in the content
+        m3u8_pattern = r'(https?://[^\s"\']+\.m3u8[^\s"\']*)'
+        m3u8_match = re.search(m3u8_pattern, m3u8_content)
+
+        if m3u8_match:
+            m3u8_url = m3u8_match.group(1)
+            print(f"✅ Found direct m3u8 URL: {m3u8_url[:100]}...")
+            return m3u8_url
+
+        # Method 3: Build from base URL
+        domain_pattern = r'(https?://[^/]+)/([^/]+)/([^/]+)/hls/'
+        domain_match = re.search(domain_pattern, m3u8_content)
+
+        if domain_match:
+            base_url = domain_match.group(1)
+            folder1 = domain_match.group(2)
+            folder2 = domain_match.group(3)
+            master_url = f"{base_url}/{folder1}/{folder2}/master.m3u8"
+            print(f"✅ Built master.m3u8: {master_url[:100]}...")
+            return master_url
+
+        print("⚠️ Could not extract master.m3u8 URL")
+        return None
+
+    except Exception as e:
+        print(f"❌ Error extracting master.m3u8: {e}")
+        return None
+
+
+# ============================================================
+#  🔥 GET PLAYLIST CONTENT AND EXTRACT MASTER M3U8
+# ============================================================
+async def get_master_m3u8_from_api(video_url: str) -> str:
+    """
+    Fetch the M3U8 playlist and extract the master.m3u8 URL
+    """
+    try:
+        if not video_url or not str(video_url).startswith('http'):
+            return video_url
+
+        print(f"📥 Fetching playlist from: {video_url[:100]}...")
+
+        timeout = aiohttp.ClientTimeout(total=20)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(video_url) as response:
+                if response.status == 200:
+                    content = await response.text()
+                    print(f"📄 Playlist content length: {len(content)} bytes")
+
+                    # Extract master.m3u8 URL
+                    master_url = extract_master_m3u8_from_playlist(content)
+
+                    if master_url:
+                        print(f"✅ Extracted master.m3u8: {master_url[:100]}...")
+                        return master_url
+                    else:
+                        print("⚠️ Could not extract master.m3u8, using original URL")
+                        return video_url
+                else:
+                    print(f"❌ Failed to fetch playlist: {response.status}")
+                    return video_url
+
+    except Exception as e:
+        print(f"❌ Error fetching playlist: {e}")
+        return video_url
+
+
+# ============================================================
+#  🔥 DOWNLOAD VIA ASMULTIVERSE API
+# ============================================================
+async def download_via_asmultiverse(video_url: str, name: str) -> Optional[str]:
+    """
+    Download video using asmultiverse API with safe timeout protection
+    """
+    try:
+        encoded_url = urllib.parse.quote(video_url, safe='')
+        download_url = f"https://download.asmultiverse.com?Vurl={encoded_url}"
+
+        print(f"📥 Downloading via asmultiverse: {download_url[:100]}...")
+
+        output_file = f"{name}.mp4"
+
+        cmd = [
+            'yt-dlp',
+            '-f', 'best',
+            '--merge-output-format', 'mp4',
+            '--allow-unplayable-format',
+            '--no-check-certificate',
+            '--retries', '50',
+            '--fragment-retries', '50',
+            '--http-chunk-size', '10M',
+            '--buffer-size', '32K',
+            '--no-warnings',
+            '-o', output_file,
+            download_url
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await run_subprocess_with_timeout(process, timeout=600)
+
+        if process.returncode == 0 and os.path.exists(output_file):
+            file_size = os.path.getsize(output_file)
+            if file_size > 100000:
+                is_valid, reason = await verify_video_integrity(output_file)
+                if is_valid:
+                    print(f"✅ Downloaded via asmultiverse: {file_size} bytes")
+                    return output_file
+                else:
+                    print(f"⚠️ asmultiverse video rejected: {reason}")
+                    try:
+                        os.remove(output_file)
+                    except Exception:
+                        pass
+
+        return None
+
+    except Exception as e:
+        print(f"❌ asmultiverse download error: {e}")
+        return None
 
 
 
@@ -539,16 +724,23 @@ async def remux_to_mp4(input_path: str, output_path: str) -> str:
 
 
 # ============================================================
-#  🔥 RESILIENT VIDEO DOWNLOAD ENGINE
+#  🔥 RESILIENT VIDEO DOWNLOAD ENGINE (PW + asmultiverse + yt-dlp + ffmpeg)
 # ============================================================
-async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
+async def download_pw_video(url: str, name: str, quality: str = '720', video_id: str = None) -> Optional[str]:
     """
-    Downloads PW video using multi-tiered engine.
-    Ensures complete downloads and prevents 1-segment truncations.
+    PW video downloader with master.m3u8 extraction, asmultiverse API support,
+    optimized yt-dlp, and resilient ffmpeg stream remuxing.
     """
     try:
+        print(f"🎬 Downloading PW video: {name}")
+        print(f"🔗 URL: {url[:150]}...")
+        print(f"📺 Quality: {quality}p")
+
         if not url or not str(url).startswith('http'):
             raise Exception(f"Invalid URL: {url}")
+
+        if video_id:
+            safe_db_update_video_status(video_id, 'downloading')
 
         base_dir = os.path.dirname(name)
         if base_dir:
@@ -565,8 +757,34 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
                     pass
 
         # ------------------------------------------------------------
-        #  TIER 1: OPTIMIZED YT-DLP (Native HLS / DASH)
+        #  STEP 1: Get master.m3u8 from the playlist if applicable
         # ------------------------------------------------------------
+        master_url = await get_master_m3u8_from_api(url)
+
+        if master_url and master_url != url:
+            print(f"✅ Using master.m3u8: {master_url[:100]}...")
+            video_url_to_download = master_url
+        else:
+            print("🔄 Using original URL")
+            video_url_to_download = url
+
+        # ------------------------------------------------------------
+        #  STEP 2: Try asmultiverse API first
+        # ------------------------------------------------------------
+        print("🔄 Trying asmultiverse API download...")
+        try:
+            result = await download_via_asmultiverse(video_url_to_download, name)
+            if result and os.path.exists(result):
+                if video_id:
+                    safe_db_update_video_status(video_id, 'downloaded', result)
+                return result
+        except Exception as ex:
+            print(f"⚠️ asmultiverse attempt error: {ex}")
+
+        # ------------------------------------------------------------
+        #  STEP 3: Optimized yt-dlp (Native HLS / DASH / MPD)
+        # ------------------------------------------------------------
+        print("🔄 Trying yt-dlp...")
         format_selector = (
             f"bestvideo[height<={quality}]+bestaudio/"
             f"best[height<={quality}]/"
@@ -581,8 +799,8 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
             '--no-cache-dir',
             '--ignore-errors',
             '--allow-unplayable-format',
-            '--hls-use-mpegts',                 # Handle HLS TS packets seamlessly
-            '--skip-unavailable-fragments',     # Do NOT abort on missing fragment
+            '--hls-use-mpegts',
+            '--skip-unavailable-fragments',
             '--fragment-retries', '30',
             '--retries', '30',
             '--concurrent-fragments', '5',
@@ -590,10 +808,10 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
             '--merge-output-format', 'mp4',
             '-f', format_selector,
             '-o', f"{name}.%(ext)s",
-            url
+            video_url_to_download
         ]
 
-        if 'classplus' in url or 'akamai' in url:
+        if 'classplus' in video_url_to_download or 'akamai' in video_url_to_download:
             ytdlp_cmd.extend(['--add-header', 'Referer:https://classplusapp.com/'])
 
         try:
@@ -610,31 +828,38 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
                 is_valid, reason = await verify_video_integrity(final_file)
                 if is_valid:
                     print(f"✅ yt-dlp successful: {os.path.getsize(final_file)} bytes")
+                    if video_id:
+                        safe_db_update_video_status(video_id, 'downloaded', final_file)
                     return final_file
                 else:
-                    print(f"⚠️ yt-dlp download incomplete: {reason}. Attempting Tier 2...")
+                    print(f"⚠️ yt-dlp download incomplete: {reason}. Attempting ffmpeg...")
                     if os.path.exists(final_file):
-                        os.remove(final_file)
+                        try:
+                            os.remove(final_file)
+                        except Exception:
+                            pass
         except asyncio.TimeoutError:
             print("⚠️ yt-dlp timeout. Falling back to ffmpeg...")
         except Exception as e:
             print(f"⚠️ yt-dlp error: {e}")
 
         # ------------------------------------------------------------
-        #  TIER 2: FFMPEG STREAM REMUX (Direct M3U8 Master Handler)
+        #  STEP 4: Fallback to ffmpeg direct download
         # ------------------------------------------------------------
+        print("🔄 Trying ffmpeg direct download...")
         ffmpeg_cmd = [
             'ffmpeg', '-y',
-            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             '-reconnect', '1',
             '-reconnect_streamed', '1',
-            '-reconnect_delay_max', '10',
+            '-reconnect_delay_max', '5',
             '-err_detect', 'ignore_err',
-            '-i', url,
+            '-i', video_url_to_download,
             '-c', 'copy',
             '-bsf:a', 'aac_adtstoasc',
             '-movflags', '+faststart',
             '-max_muxing_queue_size', '9999',
+            '-threads', '4',
             target_mp4
         ]
 
@@ -649,19 +874,24 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
             if os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 100000:
                 is_valid, reason = await verify_video_integrity(target_mp4)
                 if is_valid:
-                    print(f"✅ ffmpeg stream successful: {os.path.getsize(target_mp4)} bytes")
+                    print(f"✅ ffmpeg successful: {os.path.getsize(target_mp4)} bytes")
+                    if video_id:
+                        safe_db_update_video_status(video_id, 'downloaded', target_mp4)
                     return target_mp4
                 else:
-                    print(f"⚠️ ffmpeg stream incomplete: {reason}")
+                    print(f"⚠️ ffmpeg result rejected: {reason}")
                     if os.path.exists(target_mp4):
-                        os.remove(target_mp4)
-        except Exception as e:
-            print(f"⚠️ ffmpeg stream error: {e}")
+                        try:
+                            os.remove(target_mp4)
+                        except Exception:
+                            pass
+        except Exception as ex:
+            print(f"⚠️ ffmpeg error: {ex}")
 
         # ------------------------------------------------------------
-        #  TIER 3: ARIA2C DIRECT DOWNLOAD (For raw mp4 binaries)
+        #  STEP 5: Fallback to aria2c (For raw mp4 binaries)
         # ------------------------------------------------------------
-        if not ('.m3u8' in url or '.mpd' in url):
+        if not ('.m3u8' in video_url_to_download or '.mpd' in video_url_to_download):
             aria2_cmd = [
                 'aria2c',
                 '-x', '8', '-s', '8', '-k', '1M', '-j', '4',
@@ -670,7 +900,7 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
                 '--console-log-level=error',
                 '-d', base_dir or '.',
                 '-o', f"{os.path.basename(name)}.mp4",
-                url
+                video_url_to_download
             ]
             try:
                 p_aria = await asyncio.create_subprocess_exec(
@@ -683,14 +913,20 @@ async def download_pw_video(url: str, name: str, quality: str = '720') -> str:
                 if os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 100000:
                     is_valid, _ = await verify_video_integrity(target_mp4)
                     if is_valid:
+                        if video_id:
+                            safe_db_update_video_status(video_id, 'downloaded', target_mp4)
                         return target_mp4
             except Exception as e:
                 print(f"⚠️ aria2c error: {e}")
 
+        if video_id:
+            safe_db_update_video_status(video_id, 'failed')
         return None
 
     except Exception as e:
         print(f"❌ Video download error: {e}")
+        if video_id:
+            safe_db_update_video_status(video_id, 'failed')
         return None
 
 
@@ -723,6 +959,15 @@ async def download_and_upload_video(
     os.makedirs("temp_downloads", exist_ok=True)
     filename = f"temp_downloads/video_{int(time.time())}_{index}"
     current_url = video_url
+    vid_key = video_id or f"idx_{index}"
+
+    safe_db_add_video(vid_key, {
+        'title': title,
+        'batch_name': batch_name,
+        'quality': quality,
+        'index': index,
+        'video_url': video_url
+    })
     
     # Fallback qualities list if primary quality produces truncated 1.2MB file
     quality_ladder = [quality]
@@ -767,7 +1012,7 @@ async def download_and_upload_video(
                     print(f"⚠️ Quality switch URL error: {ex}")
 
             # Download Video
-            downloaded_file = await download_pw_video(current_url, filename, active_q)
+            downloaded_file = await download_pw_video(current_url, filename, active_q, video_id=vid_key)
             if not downloaded_file or not os.path.exists(downloaded_file):
                 raise Exception("Download failed - no playable file produced")
 
@@ -880,6 +1125,8 @@ async def download_and_upload_video(
                 except Exception:
                     pass
 
+            safe_db_update_video_status(vid_key, 'uploaded')
+            safe_db_mark_video_completed(vid_key)
             return True
 
         except Exception as e:
@@ -905,6 +1152,8 @@ async def download_and_upload_video(
                     pass
 
             await asyncio.sleep(2)
+
+    safe_db_update_video_status(vid_key, 'failed')
 
     raise Exception(f"All resolution attempts failed: {last_error}")
 
