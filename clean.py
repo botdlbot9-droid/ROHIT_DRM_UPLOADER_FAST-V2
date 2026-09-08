@@ -8,21 +8,19 @@ from datetime import datetime
 from pyrogram.handlers import MessageHandler
 
 def clean_downloads():
-    """Clean everything in downloads directory"""
-    try:
-        # Create downloads directory if it doesn't exist
-        os.makedirs("downloads", exist_ok=True)
-        
-        # Remove all files in downloads directory
-        for file in glob.glob("downloads/*"):
-            try:
-                if os.path.isfile(file):
-                    os.remove(file)
-                    print(f"Removed from downloads: {file}")
-            except Exception as e:
-                print(f"Error removing {file}: {e}")
-    except Exception as e:
-        print(f"Error cleaning downloads: {e}")
+    """Clean everything in downloads and temp_downloads directory"""
+    for folder in ["downloads", "temp_downloads"]:
+        try:
+            os.makedirs(folder, exist_ok=True)
+            for file in glob.glob(f"{folder}/*"):
+                try:
+                    if os.path.isfile(file):
+                        os.remove(file)
+                        print(f"Removed from {folder}: {file}")
+                except Exception as e:
+                    print(f"Error removing {file}: {e}")
+        except Exception as e:
+            print(f"Error cleaning {folder}: {e}")
 
 def clean_media_files():
     """Clean images and videos except wm.png"""
