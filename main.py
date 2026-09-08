@@ -1247,7 +1247,7 @@ async def txt_handler(bot: Client, m: Message):
                 bcov = f'bcov_auth={cwtoken}'
                 url = url.split("bcov_auth")[0]+bcov
                            
-            elif ".m1p4d" in url or "p4w.live5" in url:
+            elif ".asmultiverse.com/?" in url or "master.m3u8?" in url:
                 url = f"https://download.asmultiverse.com?Vurl={url}"
 
             if ".pdf*" in url or ".pdf" in url:
