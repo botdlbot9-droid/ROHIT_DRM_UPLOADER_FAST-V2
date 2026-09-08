@@ -371,64 +371,6 @@ async def get_master_m3u8_from_api(video_url: str) -> str:
         return video_url
 
 
-# ============================================================
-#  🔥 DOWNLOAD VIA ASMULTIVERSE API
-# ============================================================
-async def download_via_asmultiverse(video_url: str, name: str) -> Optional[str]:
-    """
-    Download video using asmultiverse API with safe timeout protection
-    """
-    try:
-        encoded_url = urllib.parse.quote(video_url, safe='')
-        download_url = f"https://download.asmultiverse.com?Vurl={encoded_url}"
-
-        print(f"📥 Downloading via asmultiverse: {download_url[:100]}...")
-
-        output_file = f"{name}.mp4"
-
-        cmd = [
-            'yt-dlp',
-            '-f', 'best',
-            '--merge-output-format', 'mp4',
-            '--allow-unplayable-format',
-            '--no-check-certificate',
-            '--retries', '50',
-            '--fragment-retries', '50',
-            '--http-chunk-size', '10M',
-            '--buffer-size', '32K',
-            '--no-warnings',
-            '-o', output_file,
-            download_url
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await run_subprocess_with_timeout(process, timeout=600)
-
-        if process.returncode == 0 and os.path.exists(output_file):
-            file_size = os.path.getsize(output_file)
-            if file_size > 100000:
-                is_valid, reason = await verify_video_integrity(output_file)
-                if is_valid:
-                    print(f"✅ Downloaded via asmultiverse: {file_size} bytes")
-                    return output_file
-                else:
-                    print(f"⚠️ asmultiverse video rejected: {reason}")
-                    try:
-                        os.remove(output_file)
-                    except Exception:
-                        pass
-
-        return None
-
-    except Exception as e:
-        print(f"❌ asmultiverse download error: {e}")
-        return None
-
-
 
 # ============================================================
 #  🎬 METADATA & SMART THUMBNAIL GENERATOR
@@ -724,6 +666,114 @@ async def remux_to_mp4(input_path: str, output_path: str) -> str:
 
 
 # ============================================================
+#  🔥 DOWNLOAD VIA ASMULTIVERSE API
+# ============================================================
+async def download_via_asmultiverse(video_url: str, name: str, quality: str = '720') -> Optional[str]:
+    """
+    Download video using asmultiverse API gateway with yt-dlp.
+    Handles CloudFront DRM signed URLs seamlessly.
+    Matches CMD: yt-dlp "https://download.asmultiverse.com/?Vurl=<raw_url>"
+    """
+    try:
+        clean_url = str(video_url).strip()
+        clean_name = str(name).strip()
+        base_dir = os.path.dirname(clean_name)
+        if base_dir:
+            os.makedirs(base_dir, exist_ok=True)
+
+        target_mp4 = f"{clean_name}.mp4"
+
+        # Construct asmultiverse download URL with trailing slash before query parameter: /?Vurl=
+        # In CMD screenshot, the raw CloudFront URL is passed directly in ?Vurl=
+        download_url = f"https://download.asmultiverse.com/?Vurl={clean_url}"
+
+        print(f"📥 Downloading via asmultiverse: {download_url[:120]}...")
+
+        # Setup format selector: prefer requested quality, fallback to best
+        if quality and str(quality).isdigit():
+            format_selector = (
+                f"bestvideo[height<={quality}]+bestaudio/"
+                f"best[height<={quality}]/"
+                f"b[height<={quality}]/"
+                f"best"
+            )
+        else:
+            format_selector = "best"
+
+        # Standard clean yt-dlp command matching working CMD setup
+        cmd = [
+            'yt-dlp',
+            '--no-check-certificate',
+            '--no-cache-dir',
+            '--retries', '50',
+            '--fragment-retries', '50',
+            '--concurrent-fragments', '5',
+            '--merge-output-format', 'mp4',
+            '-f', format_selector,
+            '-o', f"{clean_name}.%(ext)s",
+            download_url
+        ]
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await run_subprocess_with_timeout(process, timeout=1800)
+
+        # 1. Search for downloaded file with standard extensions
+        found_file = find_downloaded_media(clean_name)
+
+        # 2. Resilient check: if generic title was produced (like 'generic video #master [master].mp4')
+        if not found_file:
+            candidates = [
+                "generic video #master [master].mp4",
+                "generic video #master [master].mkv",
+                "generic video #master [master].ts"
+            ]
+            if base_dir:
+                candidates.extend([os.path.join(base_dir, c) for c in candidates])
+            for cand in candidates:
+                if cand and os.path.exists(cand) and os.path.getsize(cand) > 100000:
+                    try:
+                        shutil.move(cand, target_mp4)
+                        found_file = target_mp4
+                        print(f"📦 Renamed generic video to: {target_mp4}")
+                        break
+                    except Exception as e:
+                        print(f"⚠️ Could not rename {cand}: {e}")
+
+        # 3. If file found, remux to mp4 and verify integrity
+        if found_file and os.path.exists(found_file):
+            final_file = await remux_to_mp4(found_file, target_mp4)
+            is_valid, reason = await verify_video_integrity(final_file)
+            if is_valid:
+                file_size = os.path.getsize(final_file)
+                print(f"✅ Downloaded via asmultiverse: {file_size} bytes ({format_size_readable(file_size)})")
+                return final_file
+            else:
+                print(f"⚠️ asmultiverse video rejected: {reason}")
+                try:
+                    os.remove(final_file)
+                except Exception:
+                    pass
+
+        # 4. Log detailed yt-dlp error output if failed
+        err_msg = stderr.decode(errors='ignore').strip() if stderr else ""
+        if err_msg:
+            err_summary = "\n".join(err_msg.splitlines()[:3])
+            print(f"⚠️ asmultiverse yt-dlp error (code {process.returncode}):\n{err_summary}")
+        else:
+            print(f"⚠️ asmultiverse yt-dlp exited with code {process.returncode} (no file produced)")
+
+        return None
+
+    except Exception as e:
+        print(f"❌ asmultiverse download error: {e}")
+        return None
+
+
+# ============================================================
 #  🔥 RESILIENT VIDEO DOWNLOAD ENGINE (PW + asmultiverse + yt-dlp + ffmpeg)
 # ============================================================
 async def download_pw_video(url: str, name: str, quality: str = '720', video_id: str = None) -> Optional[str]:
@@ -773,11 +823,20 @@ async def download_pw_video(url: str, name: str, quality: str = '720', video_id:
         # ------------------------------------------------------------
         print("🔄 Trying asmultiverse API download...")
         try:
-            result = await download_via_asmultiverse(video_url_to_download, name)
+            result = await download_via_asmultiverse(video_url_to_download, name, quality=quality)
             if result and os.path.exists(result):
                 if video_id:
                     safe_db_update_video_status(video_id, 'downloaded', result)
                 return result
+
+            # If master_url failed and we have an original URL, try asmultiverse with original URL
+            if video_url_to_download != url:
+                print("🔄 Retrying asmultiverse with original playlist URL...")
+                result = await download_via_asmultiverse(url, name, quality=quality)
+                if result and os.path.exists(result):
+                    if video_id:
+                        safe_db_update_video_status(video_id, 'downloaded', result)
+                    return result
         except Exception as ex:
             print(f"⚠️ asmultiverse attempt error: {ex}")
 
@@ -798,13 +857,11 @@ async def download_pw_video(url: str, name: str, quality: str = '720', video_id:
             '--no-warnings',
             '--no-cache-dir',
             '--ignore-errors',
-            '--allow-unplayable-format',
             '--hls-use-mpegts',
             '--skip-unavailable-fragments',
             '--fragment-retries', '30',
             '--retries', '30',
             '--concurrent-fragments', '5',
-            '--http-chunk-size', '10M',
             '--merge-output-format', 'mp4',
             '-f', format_selector,
             '-o', f"{name}.%(ext)s",
