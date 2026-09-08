@@ -204,7 +204,7 @@ async def generate_video_url(batch_id: str, video_id: str, token: str, random_id
     endpoints = [
         f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_clean}&childId={video_clean}&token={token}&randomid={random_id}",
         f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_clean}&childId={video_clean}&quality={quality}&token={token}&randomid={random_id}",
-        f"https://anonymouspwplayeer-2038df9c1dbd.herokuapp.com/pw?url=https://d1d34p8vz63oiq.cloudfront.net/{video_clean}/master.mpd&token={token}"
+        #f"https://anonymouspwplayeer-2038df9c1dbd.herokuapp.com/pw?url=https://d1d34p8vz63oiq.cloudfront.net/{video_clean}/master.mpd&token={token}"
     ]
 
     last_error = "Unknown error"
