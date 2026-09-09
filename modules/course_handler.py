@@ -983,6 +983,20 @@ async def download_and_upload_video(
             await asyncio.sleep(2)
 
     safe_db_update_video_status(vid_key, 'failed')
+    
+    # Notify Telegram about the final failure
+    try:
+        fail_msg = (
+            f"❌ <b>FAILED TO DOWNLOAD</b>\n\n"
+            f"📑 <b>Title:</b> {title}\n"
+            f"🔢 <b>Index:</b> {index}\n"
+            f"🔗 <b>Raw URL:</b> <code>{video_url}</code>\n"
+            f"📚 <b>Batch:</b> {batch_name}"
+        )
+        await client.send_message(chat_id=channel_id, text=fail_msg)
+    except Exception as ex:
+        print(f"⚠️ Failed to send failure notification: {ex}")
+
     raise Exception(f"All resolution attempts failed: {last_error}")
 
 
