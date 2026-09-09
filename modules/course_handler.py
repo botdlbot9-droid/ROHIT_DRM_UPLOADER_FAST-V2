@@ -222,47 +222,68 @@ def format_pdf_caption(
     return caption
 
 
+async def get_url_from_api(api_url: str) -> str:
+    def _sync_request():
+        return requests.get(api_url, timeout=30)
+    loop = asyncio.get_event_loop()
+    response = await loop.run_in_executor(None, _sync_request)
+    
+    if response.status_code != 200:
+        raise Exception(f"HTTP {response.status_code}")
+
+    data = response.json()
+    if data.get('success') and data.get('url'):
+        video_url = data.get('url')
+        if str(video_url).startswith('http'):
+            return str(video_url)
+    raise Exception(f"API Error or Invalid URL: {data}")
+
 # ============================================================
 #  🔥 API URL GENERATOR (Exact PW API with safe executor)
 # ============================================================
 async def generate_video_url(batch_id: str, video_id: str, token: str, random_id: str, quality: str = '720') -> str:
     """
-    Generate video URL using PW API
-    API: https://pw-vid-url.quiz-book.workers.dev/
+    Generate video URL with fallbacks:
+    1. Direct PW API approach (Placeholder for worker code)
+    4. pdablu-api
+    5. pw-vid-url
     """
     if str(video_id).startswith('http://') or str(video_id).startswith('https://'):
         return str(video_id)
 
-    api_url = f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_id}&childId={video_id}&quality={quality}&token={token}&randomid={random_id}"
-    print(f"📡 API Request: {api_url[:200]}...")
+    # Note: Step 1 (Direct PW API) goes here once the full worker code is provided
 
-    def _sync_request():
-        return requests.get(api_url, timeout=30)
+    api_urls = [
+        f"https://pdablu-api.newdrm4.workers.dev/?parentId={batch_id}&childId={video_id}&quality={quality}&token={token}&randomid={random_id}",
+        f"https://pw-vid-url.quiz-book.workers.dev/?parentId={batch_id}&childId={video_id}&quality={quality}&token={token}&randomid={random_id}"
+    ]
 
-    try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, _sync_request)
-        print(f"📡 Response Status: {response.status_code}")
+    final_url = None
+    for api_url in api_urls:
+        print(f"📡 Trying API Request: {api_url[:200]}...")
+        try:
+            url = await get_url_from_api(api_url)
+            if url:
+                final_url = url
+                break
+        except Exception as e:
+            print(f"⚠️ API attempt failed: {str(e)}")
+            continue
 
-        data = response.json()
-        print(f"📡 API Response: {data}")
+    if not final_url:
+        raise Exception("All API fallbacks failed to generate URL.")
 
-        if data.get('success') and data.get('url'):
-            video_url = data.get('url')
-            if str(video_url).startswith('http'):
-                return str(video_url)
-            else:
-                raise Exception(f"Invalid URL from API: {video_url}")
-        else:
-            error_msg = data.get('error', 'Unknown error')
-            raise Exception(f"API error: {error_msg}")
+    # 2. String Replacement: Change hsl/enc.key to master.m3u8
+    if "hsl/enc.key" in final_url or "hls/enc.key" in final_url:
+        final_url = final_url.replace("hsl/enc.key", "master.m3u8").replace("hls/enc.key", "master.m3u8")
 
-    except requests.exceptions.Timeout:
-        raise Exception("API request timeout")
-    except requests.exceptions.ConnectionError:
-        raise Exception("API connection failed")
-    except Exception as e:
-        raise Exception(f"API request failed: {str(e)}")
+    # 3. Primary Download URL Prefix
+    if not final_url.startswith("https://download.asmultiverse.com"):
+        # Safely encode the URL for query param
+        final_url = f"https://download.asmultiverse.com?Vurl={final_url}"
+
+    print(f"✅ Final Generated Video URL: {final_url}")
+    return final_url
 
 
 # ============================================================
