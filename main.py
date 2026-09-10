@@ -77,9 +77,18 @@ pyromod.listen.Client.listen = pyromod.listen.listen
 from db import db
 
 # ============================================================
-#  🆕 NEW MODULE IMPORTS FOR COURSE HANDLING
+#  🆕 MODULE IMPORTS FOR COURSE HANDLING
 # ============================================================
 from modules.course_handler import process_course_and_upload
+from modules.rarestudy_handler import (
+    process_rarestudy_and_upload,
+    is_rarestudy_json,
+    parse_rarestudy_course,
+    set_rarestudy_headers,
+    get_rarestudy_headers,
+    reset_rarestudy_headers,
+    parse_header_input
+)
 
 auto_flags = {}
 auto_clicked = False
@@ -297,6 +306,7 @@ async def start(bot: Client, m: Message):
                 "**✨ Bot is active in this channel**\n\n"
                 "**Available Commands:**\n"
                 "• /drm - Download DRM videos\n"
+                "• /rarestudy - Upload RareStudy (.json) courses\n"
                 "• /plan - View channel subscription\n\n"
                 "Send these commands in the channel to use them."
             )
@@ -326,6 +336,11 @@ async def start(bot: Client, m: Message):
                 
             commands_list = (
                 "**>  /drm - ꜱᴛᴀʀᴛ ᴜᴘʟᴏᴀᴅɪɴɢ ᴄᴘ/ᴄᴡ ᴄᴏᴜʀꜱᴇꜱ**\n"
+                "**>  /rarestudy - ᴜᴘʟᴏᴀᴅ RᴀʀᴇSᴛᴜᴅʏ (.ᴊꜱᴏɴ) ᴄᴏᴜʀꜱᴇꜱ**\n"
+                "**>  /setheaders - ᴜᴘᴅᴀᴛᴇ RᴀʀᴇSᴛᴜᴅʏ Hᴇᴀᴅᴇʀꜱ/Cᴏᴏᴋɪᴇꜱ**\n"
+                "**>  /getheaders - ᴠɪᴇᴡ RᴀʀᴇSᴛᴜᴅʏ Hᴇᴀᴅᴇʀꜱ**\n"
+                "**>  /resetheaders - ʀᴇꜱᴇᴛ Hᴇᴀᴅᴇʀꜱ ᴛᴏ Dᴇꜰᴀᴜʟᴛ**\n"
+                "**>  /add_course - ᴜᴘʟᴏᴀᴅ PW (.ᴊꜱᴏɴ) ᴄᴏᴜʀꜱᴇꜱ**\n"
                 "**>  /plan - ᴠɪᴇᴡ ʏᴏᴜʀ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ ᴅᴇᴛᴀɪʟꜱ**\n"
             )
             
@@ -409,7 +424,256 @@ async def send_logs(client: Client, m: Message):
 
 
 # ============================================================
-#  🆕 NEW COMMAND: /add_course (with all features)
+#  🆕 RARESTUDY HANDLER FLOW & COMMAND
+# ============================================================
+async def handle_rarestudy_flow(client: Client, message: Message, json_path: str, c_data: dict = None):
+    """Interactive wizard for RareStudy (rarestudy.testuk.org) course upload."""
+    if c_data is None:
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                c_data = json.load(f)
+        except Exception as e:
+            await message.reply_text(f"❌ **Error reading JSON:** {e}")
+            if os.path.exists(json_path):
+                os.remove(json_path)
+            return
+
+    batch_id, batch_name, lectures = parse_rarestudy_course(c_data)
+    total_lecs = len(lectures)
+
+    if total_lecs == 0:
+        await message.reply_text("❌ **No lectures or video IDs found in this RareStudy JSON!**")
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        return
+
+    info_card = (
+        "╔══════════════════════════════════╗\n"
+        "   ⚡ **RARESTUDY JSON DETECTED!** ⚡\n"
+        "╚══════════════════════════════════╝\n\n"
+        f"📚 **Batch:** `{batch_name}`\n"
+        f"📽️ **Total Lectures:** `{total_lecs}`\n"
+        f"🌐 **Platform:** `rarestudy.testuk.org`\n\n"
+        "🍪 **Step 2:** Send **Custom Cookies** if needed\n"
+        "*(Send `/d` to use pre-configured cookies)*:"
+    )
+    cookie_prompt = await message.reply_text(info_card)
+
+    try:
+        cookie_msg = await client.listen(message.chat.id, timeout=90)
+        raw_cookie = cookie_msg.text.strip() if cookie_msg.text else "/d"
+        if raw_cookie != "/d":
+            html_d, api_d, c_str = parse_header_input(raw_cookie)
+            if html_d or api_d:
+                set_rarestudy_headers(html_headers=html_d, api_headers=api_d)
+                custom_cookie = None
+                await message.reply_text("✅ **Headers updated & saved permanently for all future runs!**")
+            elif c_str:
+                set_rarestudy_headers(cookie=c_str)
+                custom_cookie = c_str
+                await message.reply_text("✅ **Cookies updated & saved permanently for all future runs!**")
+            else:
+                custom_cookie = raw_cookie
+        else:
+            custom_cookie = None
+    except asyncio.TimeoutError:
+        custom_cookie = None
+        await message.reply_text("⏳ Timeout! Using current saved cookies.")
+    finally:
+        try:
+            await cookie_prompt.delete()
+        except Exception:
+            pass
+
+    # Step 3: Ask for Target Channel
+    channel_kb = ReplyKeyboardMarkup(
+        [["📍 Upload to Current Chat"]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    chan_prompt = (
+        "📢 **Enter Target Channel / Group ID:**\n\n"
+        "• Tap **Upload to Current Chat**\n"
+        "• OR send Channel ID (e.g. `-1001234567890`)"
+    )
+    chan_msg = await message.reply_text(chan_prompt, reply_markup=channel_kb)
+    try:
+        channel_msg = await client.listen(message.chat.id, timeout=45)
+        raw_c = channel_msg.text.strip() if channel_msg.text else ""
+        if "Current Chat" in raw_c:
+            channel_id = message.chat.id
+        else:
+            channel_id = int(raw_c)
+    except asyncio.TimeoutError:
+        channel_id = message.chat.id
+        await message.reply_text(f"⏳ Timeout! Uploading to current chat: `{channel_id}`")
+    except ValueError:
+        channel_id = message.chat.id
+        await message.reply_text(f"❌ Invalid format! Uploading to current chat: `{channel_id}`")
+    finally:
+        try:
+            await chan_msg.delete()
+        except Exception:
+            pass
+
+    await message.reply_text(
+        "🚀 **Setup Complete! Initializing RareStudy DRM Engine...**",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    await process_rarestudy_and_upload(
+        client=client,
+        message=message,
+        json_path=json_path,
+        custom_cookie=custom_cookie,
+        channel_id=channel_id
+    )
+
+
+@bot.on_message(filters.command(["rarestudy", "testuk"]) & auth_filter)
+async def rarestudy_command(client: Client, message: Message):
+    """Starts the process to upload a RareStudy course from JSON file."""
+    welcome_card = (
+        "╔══════════════════════════════════╗\n"
+        "   ⚡ **RARESTUDY AUTO-UPLOADER** ⚡\n"
+        "╚══════════════════════════════════╝\n\n"
+        "📥 **Step 1:** Please upload your RareStudy (`rarestudy.testuk.org`) **Course .json file** now:"
+    )
+    prompt = await message.reply_text(welcome_card)
+    try:
+        json_msg = await client.listen(message.chat.id, timeout=90)
+    except asyncio.TimeoutError:
+        await message.reply_text("❌ **Timeout!** Please run /rarestudy again.")
+        return
+    finally:
+        try:
+            await prompt.delete()
+        except Exception:
+            pass
+
+    if not json_msg.document or not (json_msg.document.file_name or "").endswith(".json"):
+        await message.reply_text("❌ **Invalid file!** Please upload a valid `.json` document.")
+        return
+
+    json_path = await json_msg.download()
+    await handle_rarestudy_flow(client, message, json_path)
+
+
+# ============================================================
+#  🆕 RARESTUDY HEADERS COMMANDS (/setheaders, /getheaders, /resetheaders)
+# ============================================================
+@bot.on_message(filters.command(["setheaders", "headers"]) & auth_filter)
+async def set_headers_command(client: Client, message: Message):
+    """Allows updating RareStudy HTML and API headers or cookies via bot."""
+    curr_html, curr_api = get_rarestudy_headers()
+    cookie_sample = curr_html.get('cookie', '')[:45] + "..." if curr_html.get('cookie') else "None"
+
+    prompt_text = (
+        "╔══════════════════════════════════╗\n"
+        "   ⚙️ **RARESTUDY HEADERS MANAGER** ⚙️\n"
+        "╚══════════════════════════════════╝\n\n"
+        f"🍪 **Current Cookie:** `{cookie_sample}`\n"
+        f"🌐 **Current Authority:** `{curr_html.get('authority', 'rarestudy.testuk.org')}`\n\n"
+        "**Headers update karne ke 3 aasan tarike:**\n"
+        "1️⃣ **Sirf Cookie text bhejein:** `cf_clearance=...; session=...`\n"
+        "2️⃣ **Python Snippet ya JSON bhejein:**\n"
+        "   `HTML_HEADERS = {...}`\n"
+        "   `API_HEADERS = {...}`\n"
+        "3️⃣ **File upload karein:** Headers wali `.txt` ya `.json` file\n\n"
+        "*(Apna naya header bhejein ya type karein `/cancel`)*"
+    )
+    ask_msg = await message.reply_text(prompt_text)
+
+    try:
+        resp_msg = await client.listen(message.chat.id, timeout=120)
+    except asyncio.TimeoutError:
+        await message.reply_text("⏳ **Timeout!** Headers update cancel ho gaya.")
+        return
+    finally:
+        try:
+            await ask_msg.delete()
+        except Exception:
+            pass
+
+    if resp_msg.text and resp_msg.text.strip() == "/cancel":
+        await resp_msg.reply_text("❌ Cancelled.")
+        return
+
+    raw_input = ""
+    if resp_msg.document:
+        doc_path = await resp_msg.download()
+        try:
+            with open(doc_path, "r", encoding="utf-8") as f:
+                raw_input = f.read()
+        finally:
+            if os.path.exists(doc_path):
+                os.remove(doc_path)
+    elif resp_msg.text:
+        raw_input = resp_msg.text.strip()
+
+    if not raw_input:
+        await message.reply_text("❌ **Khali input!** Koi text ya file nahi mili.")
+        return
+
+    html_dict, api_dict, cookie_str = parse_header_input(raw_input)
+
+    if html_dict or api_dict:
+        set_rarestudy_headers(html_headers=html_dict, api_headers=api_dict)
+        await message.reply_text(
+            "✅ **Headers Successfully Updated & Saved!**\n"
+            "💾 *Ab sabhi RareStudy downloads naye HTML aur API headers se execute honge.*"
+        )
+    elif cookie_str:
+        set_rarestudy_headers(cookie=cookie_str)
+        await message.reply_text(
+            "✅ **Cookies Successfully Updated & Saved!**\n"
+            "🍪 *Dono HTML aur API headers me nayi cookie apply aur persist ho gayi hai.*"
+        )
+    elif "=" in raw_input:
+        set_rarestudy_headers(cookie=raw_input)
+        await message.reply_text("✅ **Cookies updated successfully!**")
+    else:
+        await message.reply_text(
+            "⚠️ **Format samajh nahi aaya!**\n"
+            "Kripya valid cookie string (`cf_clearance=...`) ya JSON/Python dictionary bhejein."
+        )
+
+
+@bot.on_message(filters.command("getheaders") & auth_filter)
+async def get_headers_command(client: Client, message: Message):
+    """Sends current active RareStudy headers as a document."""
+    curr_html, curr_api = get_rarestudy_headers()
+    data = {
+        "HTML_HEADERS": curr_html,
+        "API_HEADERS": curr_api
+    }
+    temp_file = "current_rarestudy_headers.json"
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+        cookie_snip = curr_html.get('cookie', '')[:60] + "..." if curr_html.get('cookie') else "None"
+        caption = (
+            "📄 **Current Active RareStudy Headers**\n\n"
+            f"🍪 **Cookie:** `{cookie_snip}`\n"
+            f"🌐 **Authority:** `{curr_html.get('authority', 'rarestudy.testuk.org')}`\n\n"
+            "*(Pura data attached JSON me hai)*"
+        )
+        await message.reply_document(document=temp_file, caption=caption)
+    finally:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+
+@bot.on_message(filters.command("resetheaders") & auth_filter)
+async def reset_headers_command(client: Client, message: Message):
+    """Resets RareStudy headers to factory default."""
+    reset_rarestudy_headers()
+    await message.reply_text("🔄 **RareStudy Headers reset to factory default!**")
+
+
+# ============================================================
+#  🆕 COMMAND: /add_course (with auto-detection)
 # ============================================================
 @bot.on_message(filters.command("add_course") & auth_filter)
 async def add_course_command(client: Client, message: Message):
@@ -450,6 +714,12 @@ async def add_course_command(client: Client, message: Message):
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             c_data = json.load(f)
+
+            # Auto-detect RareStudy / TestUK format
+            if is_rarestudy_json(c_data):
+                await handle_rarestudy_flow(client, message, json_path, c_data)
+                return
+
             detected_batch = (
                 c_data.get('batch', {}).get('name')
                 or c_data.get('batch_name')
@@ -1247,7 +1517,7 @@ async def txt_handler(bot: Client, m: Message):
                 bcov = f'bcov_auth={cwtoken}'
                 url = url.split("bcov_auth")[0]+bcov
                            
-            elif ".asmultiverse.com/?" in url or "master.m3u8?" in url:
+            elif ".m1p4d" in url or "p4w.live5" in url:
                 url = f"https://download.asmultiverse.com?Vurl={url}"
 
             if ".pdf*" in url or ".pdf" in url:
