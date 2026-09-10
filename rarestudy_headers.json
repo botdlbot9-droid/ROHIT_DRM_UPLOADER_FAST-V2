@@ -1,0 +1,32 @@
+{
+  "HTML_HEADERS": {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "accept-language": "en-US,en;q=0.9",
+    "authority": "rarestudy.testuk.org",
+    "cookie": "cf_clearance=QqQJXkf2u63mMo16bJ3phLTR2O_7FxSdsdJEvA23fSI-1789054440-1.2.1.1-gQpmM85.HFb12YBbOKBupV9wDPiQpVwD5JFE0zFGehcMlKAan92zemcPGTGdTcMPlfwg2QfITEL.qWs38h_McUofdkohejgYmBoOqFrXl_TInkaqPkO75b8J1VBu7k80HBuDb5Fw7k0jjUX0xFhXaoTzGu5THUEVr39kQ4eDV7qzFtB_zUnNO5Z4_ZXvDPpLk.hz7FySvCcb3vU5uHMB_emOv0_xovjkH5zL0PMJz1V8OHo4R1rnSVObfHFj00o8twNbSkWGTJb9Dd_ELWXu3a3BBq0Us2Mmb4oxdCG9_w9IMacWLwYS0_Gmk.V7kfFFKnWa7yizsuj5fIEHW2Yx0xAOSr7NIM76.WIpd6wdTXc; session_expiry=1789141151296; favourite_batches=%5B%226a86a154bad6bc80e1acdd85%22%5D; session=.eJwFwdtugjAAANB_6fNIiogZvqGCUKloqrD60gBrC5tciwU1-_ed8was40OdNbwZwXocHvwDDIoprlTVNmANNNYX7-Qt96_eJ8uiJY-2pVeItJ1I0xJWEDxTd6Vo2W72JOrvdbRzRFXYXYduKSWirGH8WTFunbJ-PERdv9oeTTYR85YL8wgZMmBSJq8zdBf5BI1fPiQbeqFZyP0id3z7Wx4W2p7SkZDYSUJkxZXQjH9JbZmuEgYOn8ij85naRkDRLsUzdnw4yx-J6zvcXsHfP27cS94.aqLPyQ.lM7zyLZ6PiImuslH4DSNeWmO1Dc",
+    "referer": "https://rarestudy.testuk.org/stream?batchId=67fbe8415ce253f88c3345f7&subjectId=68e9f2e7a7dc8d81be47c28d&chapterId=691c878a0ec6774c93998a71&batchName=CA%20Foundation%20Sampurna%20May%202026&subjectName=Accounting&chapterName=Trial%20Balance§ion=videos",
+    "sec-ch-ua": "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
+    "sec-ch-ua-mobile": "?1",
+    "sec-ch-ua-platform": "\"Android\"",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
+    "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
+  },
+  "API_HEADERS": {
+    "accept": "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "authority": "rarestudy.testuk.org",
+    "cookie": "cf_clearance=QqQJXkf2u63mMo16bJ3phLTR2O_7FxSdsdJEvA23fSI-1789054440-1.2.1.1-gQpmM85.HFb12YBbOKBupV9wDPiQpVwD5JFE0zFGehcMlKAan92zemcPGTGdTcMPlfwg2QfITEL.qWs38h_McUofdkohejgYmBoOqFrXl_TInkaqPkO75b8J1VBu7k80HBuDb5Fw7k0jjUX0xFhXaoTzGu5THUEVr39kQ4eDV7qzFtB_zUnNO5Z4_ZXvDPpLk.hz7FySvCcb3vU5uHMB_emOv0_xovjkH5zL0PMJz1V8OHo4R1rnSVObfHFj00o8twNbSkWGTJb9Dd_ELWXu3a3BBq0Us2Mmb4oxdCG9_w9IMacWLwYS0_Gmk.V7kfFFKnWa7yizsuj5fIEHW2Yx0xAOSr7NIM76.WIpd6wdTXc; session_expiry=1789141151296; favourite_batches=%5B%226a86a154bad6bc80e1acdd85%22%5D; session=.eJwFwdtugjAAANB_6fNIiogZvqGCUKloqrD60gBrC5tciwU1-_ed8was40OdNbwZwXocHvwDDIoprlTVNmANNNYX7-Qt96_eJ8uiJY-2pVeItJ1I0xJWEDxTd6Vo2W72JOrvdbRzRFXYXYduKSWirGH8WTFunbJ-PERdv9oeTTYR85YL8wgZMmBSJq8zdBf5BI1fPiQbeqFZyP0id3z7Wx4W2p7SkZDYSUJkxZXQjH9JbZmuEgYOn8ij85naRkDRLsUzdnw4yx-J6zvcXsHfP27cS94.aqLP1A.DYxT3CZOfxu54GSzU23ZjuIOZRk",
+    "referer": "https://rarestudy.testuk.org/schedule-details?batchId=67fbe8415ce253f88c3345f7&subjectId=68e9f2e7a7dc8d81be47c28d&scheduleId=6915ca73a41f41f96c97bb2a&tap=video",
+    "sec-ch-ua": "\"Chromium\";v=\"137\", \"Not/A)Brand\";v=\"24\"",
+    "sec-ch-ua-mobile": "?1",
+    "sec-ch-ua-platform": "\"Android\"",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+    "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36"
+  }
+}
