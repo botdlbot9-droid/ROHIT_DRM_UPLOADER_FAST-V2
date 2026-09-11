@@ -87,7 +87,10 @@ from modules.rarestudy_handler import (
     set_rarestudy_headers,
     get_rarestudy_headers,
     reset_rarestudy_headers,
-    parse_header_input
+    parse_header_input,
+    set_rarestudy_proxy,
+    get_rarestudy_proxy,
+    reset_rarestudy_proxy
 )
 
 auto_flags = {}
@@ -340,6 +343,9 @@ async def start(bot: Client, m: Message):
                 "**>  /setheaders - ᴜᴘᴅᴀᴛᴇ RᴀʀᴇSᴛᴜᴅʏ Hᴇᴀᴅᴇʀꜱ/Cᴏᴏᴋɪᴇꜱ**\n"
                 "**>  /getheaders - ᴠɪᴇᴡ RᴀʀᴇSᴛᴜᴅʏ Hᴇᴀᴅᴇʀꜱ**\n"
                 "**>  /resetheaders - ʀᴇꜱᴇᴛ Hᴇᴀᴅᴇʀꜱ ᴛᴏ Dᴇꜰᴀᴜʟᴛ**\n"
+                "**>  /setproxy - ꜱᴇᴛ RᴀʀᴇSᴛᴜᴅʏ VPN / Pʀᴏxʏ (WARP)**\n"
+                "**>  /getproxy - ᴠɪᴇᴡ RᴀʀᴇSᴛᴜᴅʏ Pʀᴏxʏ Sᴛᴀᴛᴜꜱ**\n"
+                "**>  /resetproxy - ʀᴇꜱᴇᴛ Pʀᴏxʏ ᴛᴏ Dɪʀᴇᴄᴛ**\n"
                 "**>  /add_course - ᴜᴘʟᴏᴀᴅ PW (.ᴊꜱᴏɴ) ᴄᴏᴜʀꜱᴇꜱ**\n"
                 "**>  /plan - ᴠɪᴇᴡ ʏᴏᴜʀ ꜱᴜʙꜱᴄʀɪᴘᴛɪᴏɴ ᴅᴇᴛᴀɪʟꜱ**\n"
             )
@@ -670,6 +676,98 @@ async def reset_headers_command(client: Client, message: Message):
     """Resets RareStudy headers to factory default."""
     reset_rarestudy_headers()
     await message.reply_text("🔄 **RareStudy Headers reset to factory default!**")
+
+
+# ============================================================
+#  🆕 RARESTUDY PROXY / VPN COMMANDS (/setproxy, /getproxy, /resetproxy)
+# ============================================================
+@bot.on_message(filters.command(["setproxy", "proxy", "vpn"]) & auth_filter)
+async def set_proxy_command(client: Client, message: Message):
+    """Allows setting HTTP/HTTPS/SOCKS5 proxy or VPN for RareStudy requests."""
+    text_parts = message.text.split(maxsplit=1)
+    if len(text_parts) > 1:
+        proxy_val = text_parts[1].strip()
+        set_rarestudy_proxy(proxy_val)
+        await message.reply_text(
+            "✅ **Proxy/VPN Successfully Set & Saved!**\n\n"
+            f"🛡️ **Active Proxy:** `{proxy_val}`\n"
+            "🌐 *Ab RareStudy ke sabhi HTML, API aur Video Segment requests is proxy ke through route honge.*"
+        )
+        return
+
+    curr_p = get_rarestudy_proxy()
+    curr_display = curr_p if curr_p else "None (Direct Connection)"
+
+    prompt_text = (
+        "╔══════════════════════════════════╗\n"
+        "   🛡️ **RARESTUDY VPN / PROXY MANAGER** 🛡️\n"
+        "╚══════════════════════════════════╝\n\n"
+        f"🌐 **Current Proxy:** `{curr_display}`\n\n"
+        "**Proxy / VPN URL bhejein (HTTP ya SOCKS5):**\n"
+        "• **Cloudflare WARP (Local):** `socks5://127.0.0.1:40000`\n"
+        "• **SOCKS5 Proxy:** `socks5://user:pass@ip:port`\n"
+        "• **HTTP Proxy:** `http://user:pass@ip:port`\n\n"
+        "💡 *Aap direct command bhi use kar sakte hain:* `/setproxy <proxy_url>`\n\n"
+        "*(Apna proxy URL bhejein ya type karein `/cancel`)*"
+    )
+    ask_msg = await message.reply_text(prompt_text)
+
+    try:
+        resp_msg = await client.listen(message.chat.id, timeout=120)
+    except asyncio.TimeoutError:
+        await message.reply_text("⏳ **Timeout!** Proxy setup cancel ho gaya.")
+        return
+    finally:
+        try:
+            await ask_msg.delete()
+        except Exception:
+            pass
+
+    if resp_msg.text and resp_msg.text.strip() == "/cancel":
+        await resp_msg.reply_text("❌ Cancelled.")
+        return
+
+    proxy_input = (resp_msg.text or "").strip()
+    if not proxy_input:
+        await message.reply_text("❌ **Khali input!** Koi URL nahi mila.")
+        return
+
+    # Auto-prefix http:// if raw host:port provided
+    if not (proxy_input.startswith("http://") or proxy_input.startswith("https://") or proxy_input.startswith("socks")):
+        proxy_input = f"http://{proxy_input}"
+
+    set_rarestudy_proxy(proxy_input)
+    await message.reply_text(
+        "✅ **Proxy/VPN Successfully Set & Saved!**\n\n"
+        f"🛡️ **Active Proxy:** `{proxy_input}`\n"
+        "🌐 *Ab RareStudy ke sabhi HTML, API aur Video Segment requests is proxy ke through route honge.*"
+    )
+
+
+@bot.on_message(filters.command(["getproxy", "myproxy"]) & auth_filter)
+async def get_proxy_command(client: Client, message: Message):
+    """Displays current active proxy configuration for RareStudy."""
+    curr_p = get_rarestudy_proxy()
+    if curr_p:
+        await message.reply_text(
+            "🛡️ **Current Active RareStudy Proxy / VPN**\n\n"
+            f"🔗 **URL:** `{curr_p}`\n"
+            "🌐 **Routing:** RareStudy HTML, API, aur Video segment downloads is proxy ke through chal rahe hain.\n\n"
+            "💡 *Proxy hatane ke liye* `/resetproxy` *type karein.*"
+        )
+    else:
+        await message.reply_text(
+            "🛡️ **RareStudy Proxy / VPN Status**\n\n"
+            "🌐 **Active Status:** `Direct Connection (No Proxy)`\n\n"
+            "💡 *Naya proxy lagane ke liye type karein:* `/setproxy <proxy_url>`"
+        )
+
+
+@bot.on_message(filters.command("resetproxy") & auth_filter)
+async def reset_proxy_command(client: Client, message: Message):
+    """Clears the proxy and reverts RareStudy to direct connection."""
+    reset_rarestudy_proxy()
+    await message.reply_text("🔄 **Proxy cleared! RareStudy will now use Direct Connection.**")
 
 
 # ============================================================
@@ -1883,6 +1981,11 @@ async def user_commands_callback(client, callback_query: CallbackQuery):
     user_cmds_text = (
         "**👤 यूज़र कमांड्स (सभी को उपलब्ध)**\n\n"
         "• `/plan` – अपनी सब्सक्रिप्शन डिटेल देखें\n"
+        "• `/rarestudy` – RareStudy कोर्स (.json) अपलोड करें\n"
+        "• `/setheaders` – RareStudy कुकीज़/हेडर्स अपडेट करें\n"
+        "• `/setproxy` – RareStudy VPN/Proxy (WARP) सेट करें\n"
+        "• `/getproxy` – एक्टिव प्रॉक्सी स्टेटस देखें\n"
+        "• `/resetproxy` – प्रॉक्सी हटाकर डायरेक्ट करें\n"
         "• `/cookies` – कुकीज़ फ़ाइल अपलोड करें\n"
         "• `/getcookies` – मौजूदा कुकीज़ डाउनलोड करें\n"
         "• `/start` – बोट स्टार्ट करें\n"
