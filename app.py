@@ -16,7 +16,9 @@ try:
         API_HEADERS,
         process_video_extraction,
         build_download_cmd,
-        find_binary
+        find_binary,
+        get_rarestudy_proxy,
+        set_rarestudy_proxy
     )
 except ImportError:
     DOWNLOAD_DIR = os.path.abspath("downloads")
@@ -129,6 +131,16 @@ def api_download_now():
         return jsonify({"status": "success", "message": f"Successfully downloaded: {title}.mp4"})
     else:
         return jsonify({"status": "error", "message": msg}), 500
+
+
+@app.route('/api/proxy', methods=['GET', 'POST'])
+def api_proxy():
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        new_proxy = data.get('proxy', '').strip()
+        set_rarestudy_proxy(new_proxy)
+        return jsonify({"status": "success", "proxy": new_proxy})
+    return jsonify({"proxy": get_rarestudy_proxy()})
 
 
 # ==============================================================================
