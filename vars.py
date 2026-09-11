@@ -26,6 +26,9 @@ WEB_SERVER = os.environ.get("WEB_SERVER", "False").lower() == "true"
 WEBHOOK = True  # Don't change this
 PORT = int(os.environ.get("PORT", 8000))
 
+# RareStudy VPN / Proxy Configuration (HTTP/HTTPS/SOCKS5)
+RARESTUDY_PROXY = os.environ.get("RARESTUDY_PROXY", "").strip()
+
 # Message Formats
 AUTH_MESSAGES = {
     "subscription_active": """<b>🎉 Subscription Activated!</b>
