@@ -65,10 +65,17 @@ DEFAULT_API_HEADERS = {
 HTML_HEADERS = DEFAULT_HTML_HEADERS.copy()
 API_HEADERS = DEFAULT_API_HEADERS.copy()
 
+try:
+    from vars import RARESTUDY_PROXY
+except ImportError:
+    RARESTUDY_PROXY = os.environ.get("RARESTUDY_PROXY", "").strip()
+
+ACTIVE_PROXY = RARESTUDY_PROXY
+
 
 def load_saved_headers():
-    """Loads saved headers from rarestudy_headers.json if available."""
-    global HTML_HEADERS, API_HEADERS
+    """Loads saved headers and proxy from rarestudy_headers.json if available."""
+    global HTML_HEADERS, API_HEADERS, ACTIVE_PROXY
     if os.path.exists(HEADERS_FILE):
         try:
             with open(HEADERS_FILE, "r", encoding="utf-8") as f:
@@ -78,15 +85,24 @@ def load_saved_headers():
                         HTML_HEADERS = saved["HTML_HEADERS"]
                     if "API_HEADERS" in saved and isinstance(saved["API_HEADERS"], dict):
                         API_HEADERS = saved["API_HEADERS"]
+                    if "PROXY" in saved and saved["PROXY"]:
+                        ACTIVE_PROXY = str(saved["PROXY"]).strip()
         except Exception as e:
             print(f"⚠️ Error loading saved headers: {e}")
 
 
-def save_headers(html_h: dict, api_h: dict):
-    """Saves headers to rarestudy_headers.json for persistence."""
+def save_headers(html_h: dict, api_h: dict, proxy: str = None):
+    """Saves headers and proxy to rarestudy_headers.json for persistence."""
+    global ACTIVE_PROXY
+    if proxy is not None:
+        ACTIVE_PROXY = str(proxy).strip()
     try:
         with open(HEADERS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"HTML_HEADERS": html_h, "API_HEADERS": api_h}, f, indent=2)
+            json.dump({
+                "HTML_HEADERS": html_h,
+                "API_HEADERS": api_h,
+                "PROXY": ACTIVE_PROXY
+            }, f, indent=2)
     except Exception as e:
         print(f"⚠️ Error saving headers: {e}")
 
@@ -124,12 +140,29 @@ def reset_rarestudy_headers() -> Tuple[dict, dict]:
     global HTML_HEADERS, API_HEADERS
     HTML_HEADERS = DEFAULT_HTML_HEADERS.copy()
     API_HEADERS = DEFAULT_API_HEADERS.copy()
-    if os.path.exists(HEADERS_FILE):
-        try:
-            os.remove(HEADERS_FILE)
-        except Exception:
-            pass
+    save_headers(HTML_HEADERS, API_HEADERS, proxy=ACTIVE_PROXY)
     return HTML_HEADERS, API_HEADERS
+
+
+def set_rarestudy_proxy(proxy_url: str) -> str:
+    """Updates active proxy/VPN URL in memory and saves to disk."""
+    global ACTIVE_PROXY
+    ACTIVE_PROXY = str(proxy_url or "").strip()
+    save_headers(HTML_HEADERS, API_HEADERS, proxy=ACTIVE_PROXY)
+    return ACTIVE_PROXY
+
+
+def get_rarestudy_proxy() -> str:
+    """Returns the current active proxy URL."""
+    return ACTIVE_PROXY
+
+
+def reset_rarestudy_proxy() -> str:
+    """Clears the active proxy, reverting to direct network."""
+    global ACTIVE_PROXY
+    ACTIVE_PROXY = ""
+    save_headers(HTML_HEADERS, API_HEADERS, proxy="")
+    return ""
 
 
 def parse_header_input(text: str) -> Tuple[Optional[dict], Optional[dict], Optional[str]]:
@@ -319,13 +352,15 @@ def parse_rarestudy_course(json_data: Any) -> Tuple[str, str, List[Dict[str, Any
 # ==============================================================================
 # 3. EXTRACTION LOGIC (MEDIA_TOKEN & DRM KEYS)
 # ==============================================================================
-def process_video_extraction(batch_id: str, subject_id: str, schedule_id: str, title: str = "video", custom_cookie: str = None) -> Dict[str, Any]:
+def process_video_extraction(batch_id: str, subject_id: str, schedule_id: str, title: str = "video", custom_cookie: str = None, proxy: str = None) -> Dict[str, Any]:
     """
     Synchronous extraction for web API.
     Fetches HTML -> extracts MEDIA_TOKEN -> queries DASH API -> returns MPD URL & DRM Key.
+    Supports HTTP, HTTPS, and SOCKS5 proxies.
     """
     current_html = HTML_HEADERS.copy()
     current_api = API_HEADERS.copy()
+    use_proxy = proxy if proxy is not None else ACTIVE_PROXY
 
     if custom_cookie and custom_cookie.strip():
         current_html['cookie'] = custom_cookie.strip()
@@ -334,8 +369,10 @@ def process_video_extraction(batch_id: str, subject_id: str, schedule_id: str, t
     clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "video"
     html_url = f"{BASE_DOMAIN}/schedule-details?batchId={batch_id}&subjectId={subject_id}&scheduleId={schedule_id}&tap=video"
 
+    proxies = {"http": use_proxy, "https": use_proxy} if use_proxy else None
+
     try:
-        r1 = requests.get(html_url, headers=current_html, verify=False, timeout=15)
+        r1 = requests.get(html_url, headers=current_html, verify=False, timeout=20, proxies=proxies)
         if r1.status_code != 200:
             return {"status": "error", "message": f"HTML Error: HTTP {r1.status_code}", "title": clean_title}
 
@@ -346,7 +383,7 @@ def process_video_extraction(batch_id: str, subject_id: str, schedule_id: str, t
         media_token = match.group(1)
 
         api_url = f"{BASE_DOMAIN}/v1/videos/video-url-details?mediaToken={media_token}&videoContainerType=DASH"
-        r2 = requests.get(api_url, headers=current_api, verify=False, timeout=15)
+        r2 = requests.get(api_url, headers=current_api, verify=False, timeout=20, proxies=proxies)
 
         if r2.status_code != 200:
             return {"status": "error", "message": f"API Error: HTTP {r2.status_code}", "title": clean_title}
@@ -360,7 +397,7 @@ def process_video_extraction(batch_id: str, subject_id: str, schedule_id: str, t
         if not mpd_url or not drm_key:
             return {"status": "error", "message": "API response did not contain MPD URL or DRM Key", "title": clean_title}
 
-        _, cmd_display = build_download_cmd(mpd_url, drm_key, clean_title)
+        _, cmd_display = build_download_cmd(mpd_url, drm_key, clean_title, proxy=use_proxy)
 
         return {
             "status": "success",
@@ -373,10 +410,26 @@ def process_video_extraction(batch_id: str, subject_id: str, schedule_id: str, t
         return {"status": "error", "message": str(e), "title": clean_title}
 
 
-async def async_extract_video_details(batch_id: str, subject_id: str, schedule_id: str, title: str = "video", custom_cookie: str = None) -> Dict[str, Any]:
+async def async_extract_video_details(batch_id: str, subject_id: str, schedule_id: str, title: str = "video", custom_cookie: str = None, proxy: str = None) -> Dict[str, Any]:
     """
     Asynchronous extraction for Pyrogram bot and async pipelines.
+    Supports HTTP/HTTPS and SOCKS5 proxies safely.
     """
+    use_proxy = proxy if proxy is not None else ACTIVE_PROXY
+
+    # When proxy is configured (HTTP or SOCKS5), run extraction via thread
+    # because PySocks + requests supports socks5/http proxies seamlessly.
+    if use_proxy:
+        return await asyncio.to_thread(
+            process_video_extraction,
+            batch_id=batch_id,
+            subject_id=subject_id,
+            schedule_id=schedule_id,
+            title=title,
+            custom_cookie=custom_cookie,
+            proxy=use_proxy
+        )
+
     current_html = HTML_HEADERS.copy()
     current_api = API_HEADERS.copy()
 
@@ -418,7 +471,7 @@ async def async_extract_video_details(batch_id: str, subject_id: str, schedule_i
         if not mpd_url or not drm_key:
             return {"status": "error", "message": "MPD URL ya DRM Key response me nahi mili", "title": clean_title}
 
-        cmd_list, cmd_display = build_download_cmd(mpd_url, drm_key, clean_title)
+        cmd_list, cmd_display = build_download_cmd(mpd_url, drm_key, clean_title, proxy=use_proxy)
 
         return {
             "status": "success",
@@ -429,7 +482,15 @@ async def async_extract_video_details(batch_id: str, subject_id: str, schedule_i
             "cmd": cmd_display
         }
     except Exception as e:
-        return {"status": "error", "message": str(e), "title": clean_title}
+        return await asyncio.to_thread(
+            process_video_extraction,
+            batch_id=batch_id,
+            subject_id=subject_id,
+            schedule_id=schedule_id,
+            title=title,
+            custom_cookie=custom_cookie,
+            proxy=use_proxy
+        )
 
 
 # ==============================================================================
@@ -446,9 +507,10 @@ def find_binary(name: str) -> Optional[str]:
     return which_path
 
 
-def build_download_cmd(mpd_url: str, drm_key: str, title: str, save_dir: str = None) -> Tuple[List[str], str]:
+def build_download_cmd(mpd_url: str, drm_key: str, title: str, save_dir: str = None, proxy: str = None) -> Tuple[List[str], str]:
     save_path = save_dir or DOWNLOAD_DIR
     clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "video"
+    use_proxy = proxy if proxy is not None else ACTIVE_PROXY
 
     n_bin = find_binary("N_m3u8DL-RE") or "N_m3u8DL-RE"
     mp4dec_bin = find_binary("mp4decrypt")
@@ -466,31 +528,38 @@ def build_download_cmd(mpd_url: str, drm_key: str, title: str, save_dir: str = N
         "--auto-select"
     ]
 
+    if use_proxy:
+        cmd_list.extend(["--custom-proxy", use_proxy])
+
     if mp4dec_bin:
         cmd_list.extend(["--decryption-binary-path", mp4dec_bin])
 
     cmd_str = f'{n_bin} "{mpd_url}" --key "{drm_key}" -H "User-Agent: {USER_AGENT}" -H "Referer: {BASE_DOMAIN}/" -H "Origin: {BASE_DOMAIN}" --save-name "{clean_title}" --save-dir "{save_path}" -M format=mp4 --auto-select'
+    if use_proxy:
+        cmd_str += f' --custom-proxy "{use_proxy}"'
     if mp4dec_bin:
         cmd_str += f' --decryption-binary-path "{mp4dec_bin}"'
 
     return cmd_list, cmd_str
 
 
-async def async_download_video(mpd_url: str, drm_key: str, title: str, save_dir: str = None) -> Tuple[bool, str, Optional[str]]:
+async def async_download_video(mpd_url: str, drm_key: str, title: str, save_dir: str = None, proxy: str = None) -> Tuple[bool, str, Optional[str]]:
     """
     Downloads and decrypts RareStudy video asynchronously.
     Returns (success, message, file_path).
+    Supports HTTP/HTTPS and SOCKS5 proxy via N_m3u8DL-RE and yt-dlp.
     """
     target_dir = save_dir or DOWNLOAD_DIR
     os.makedirs(target_dir, exist_ok=True)
     clean_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "video"
     target_mp4 = os.path.join(target_dir, f"{clean_title}.mp4")
+    use_proxy = proxy if proxy is not None else ACTIVE_PROXY
 
     # If already downloaded and valid, return it
     if os.path.exists(target_mp4) and os.path.getsize(target_mp4) > 100000:
         return True, "Already downloaded", target_mp4
 
-    cmd_list, _ = build_download_cmd(mpd_url, drm_key, clean_title, save_dir=target_dir)
+    cmd_list, _ = build_download_cmd(mpd_url, drm_key, clean_title, save_dir=target_dir, proxy=use_proxy)
 
     # 1. Primary: N_m3u8DL-RE
     n_bin = find_binary("N_m3u8DL-RE")
@@ -541,6 +610,9 @@ async def async_download_video(mpd_url: str, drm_key: str, title: str, save_dir:
             '--add-header', f"Origin:{BASE_DOMAIN}",
             mpd_url
         ]
+        if use_proxy:
+            ytdlp_cmd.extend(['--proxy', use_proxy])
+
         p1 = await asyncio.create_subprocess_exec(*ytdlp_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         await asyncio.wait_for(p1.communicate(), timeout=1200)
 
@@ -687,9 +759,16 @@ def render_rarestudy_dashboard(
         f"📊 <b>Progress:</b> <code>[{p_bar}]</code> <b>{percent:.1f}%</b>\n"
         f"🔢 <b>Current:</b> <code>{current_idx}</code> / <code>{total_videos}</code>\n"
         f"🎬 <b>Title:</b> <i>{safe_title}</i>\n"
-        f"📈 <b>Success:</b> <code>{success_count}</code>  |  ❌ <b>Failed:</b> <code>{fail_count}</code>\n\n"
-        f"{status_text}\n"
+        f"📈 <b>Success:</b> <code>{success_count}</code>  |  ❌ <b>Failed:</b> <code>{fail_count}</code>\n"
     )
+
+    if ACTIVE_PROXY:
+        p_show = ACTIVE_PROXY
+        if '@' in p_show:
+            p_show = p_show.split('@')[-1]
+        dashboard += f"🛡️ <b>VPN/Proxy:</b> <code>{html.escape(p_show)}</code>\n"
+
+    dashboard += f"\n{status_text}\n"
     if upload_extra:
         dashboard += f"{upload_extra}\n"
 
