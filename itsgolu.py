@@ -16,6 +16,7 @@ import concurrent.futures
 from math import ceil
 from utils import progress_bar
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
 from pyrogram.types import Message
 from io import BytesIO
 from pathlib import Path  
@@ -108,7 +109,7 @@ def get_mps_and_keys(api_url, is_akamai=False):
             
             # Extract keys from MPD with Akamai support
             keys = extract_keys_from_mpd(mpd_content, is_akamai)
-            return mpd_content, keys
+            return api_url, keys
         
         # Old format: API returns JSON with MPD and KEYS
         response = requests.get(api_url, timeout=30)
@@ -369,7 +370,7 @@ async def download_pw_video(url, name, quality="720"):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
-                stdout, stderr = await process.communicate(timeout=600)
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=600)
                 
                 if process.returncode == 0 and os.path.exists(f'{name}.mp4'):
                     file_size = os.path.getsize(f'{name}.mp4')
@@ -435,7 +436,7 @@ async def download_pw_video(url, name, quality="720"):
 #  🔥 UPDATED: decrypt_and_merge_video with FULL Akamai support
 #  - Supports L1 (key+userIds), L2 (hdntl), L3 (hdnts)
 # ============================================================
-async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name, quality="720"):
+async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name, quality="720", prog=None, title=None, index=1, total_links=1, batch_name=""):
     try:
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -457,15 +458,30 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
             headers_cmd = '--add-header "Referer:https://classplusapp.com/" --add-header "Origin:https://classplusapp.com"'
         
         # ============================================================
-        #  DOWNLOAD USING yt-dlp
+        #  DOWNLOAD USING yt-dlp (MAX SPEED WITH 16 WORKERS)
         # ============================================================
-        cmd1 = f'yt-dlp -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --concurrent-fragments 10 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error" {headers_cmd} "{mpd_url}"'
+        cmd1 = f'yt-dlp --newline -f "bv[height<={quality}]+ba/b" -o "{output_path}/file.%(ext)s" --allow-unplayable-format --no-check-certificate --concurrent-fragments 16 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 16 --min-split-size=1M --max-connection-per-server=16 --summary-interval=1 --console-log-level=notice" {headers_cmd} "{mpd_url}"'
         print(f"⬇️ Running: {cmd1}")
-        await run(cmd1)
+        await run(cmd1, prog=prog, title=title or output_name, index=index, total_links=total_links, batch_name=batch_name, quality=f"{quality}p")
         
         avDir = list(output_path.iterdir())
         print(f"📁 Downloaded files: {avDir}")
         print("🔓 Decrypting...")
+
+        if prog:
+            try:
+                await prog.edit(
+                    f"╭━━━❰ 🔓 <b>𝐃𝐄𝐂𝐑𝐘𝐏𝐓𝐈𝐍𝐆 & 𝐌𝐄𝐑𝐆𝐈𝐍𝐆</b> 🔓 ❱━━━➣\n"
+                    f"┣⪼ 🔢 <b>Index :</b> <code>[{str(index).zfill(3)} / {total_links}]</code>\n"
+                    f"┣⪼ 🎬 <b>Title :</b> <code>{(title or output_name)[:48]}</code>\n"
+                    f"┣⪼ 📚 <b>Batch :</b> <i>{batch_name}</i>\n"
+                    f"┣━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"┣⪼ ⚙️ <b>Status :</b> <code>Decrypting keys with mp4decrypt...</code>\n"
+                    f"╰━━⌈ 🦋 <code>{CREDIT}</code> 🦋 ⌋━━➣",
+                    disable_web_page_preview=True
+                )
+            except Exception:
+                pass
 
         video_decrypted = False
         audio_decrypted = False
@@ -512,8 +528,24 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
         # ============================================================
         #  MERGE VIDEO AND AUDIO
         # ============================================================
+        if prog:
+            try:
+                await prog.edit(
+                    f"╭━━━❰ 🔄 <b>𝐌𝐄𝐑𝐆𝐈𝐍𝐆 𝐕𝐈𝐃𝐄𝐎 & 𝐀𝐔𝐃𝐈𝐎</b> 🔄 ❱━━━➣\n"
+                    f"┣⪼ 🔢 <b>Index :</b> <code>[{str(index).zfill(3)} / {total_links}]</code>\n"
+                    f"┣⪼ 🎬 <b>Title :</b> <code>{(title or output_name)[:48]}</code>\n"
+                    f"┣⪼ 📚 <b>Batch :</b> <i>{batch_name}</i>\n"
+                    f"┣━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"┣⪼ ⚙️ <b>Status :</b> <code>Merging audio + video with FFmpeg...</code>\n"
+                    f"┣⪼ 🚀 <b>Engine :</b> <code>Ultrafast Hardware/CPU</code>\n"
+                    f"╰━━⌈ 🦋 <code>{CREDIT}</code> 🦋 ⌋━━➣",
+                    disable_web_page_preview=True
+                )
+            except Exception:
+                pass
+
         if video_decrypted and audio_decrypted:
-            cmd4 = f'ffmpeg -i "{output_path}/video.mp4" -i "{output_path}/audio.m4a" -c copy -preset veryfast -threads 4 "{output_path}/{output_name}.mp4"'
+            cmd4 = f'ffmpeg -y -i "{output_path}/video.mp4" -i "{output_path}/audio.m4a" -c copy -preset ultrafast -threads 0 "{output_path}/{output_name}.mp4"'
             print(f"🔄 Running: {cmd4}")
             await run(cmd4)
             if (output_path / "video.mp4").exists():
@@ -521,8 +553,12 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
             if (output_path / "audio.m4a").exists():
                 (output_path / "audio.m4a").unlink()
         elif video_decrypted and not audio_decrypted:
-            cmd4 = f'mv "{output_path}/video.mp4" "{output_path}/{output_name}.mp4"'
-            await run(cmd4)
+            v_src = output_path / "video.mp4"
+            v_dest = output_path / f"{output_name}.mp4"
+            if v_src.exists():
+                if v_dest.exists():
+                    v_dest.unlink()
+                v_src.rename(v_dest)
         else:
             for data in output_path.iterdir():
                 if data.suffix in ['.mp4', '.mkv', '.webm']:
@@ -547,23 +583,138 @@ async def decrypt_and_merge_video(mpd_url, keys_string, output_path, output_name
 
 
 # ============================================================
-#  🔥 UPDATED: run – Async shell helper
+#  🔥 UPDATED: run – Async shell helper with live progress
 # ============================================================
-async def run(cmd):
+def parse_progress_line(line_str):
+    if not line_str:
+        return None
+
+    # 1. aria2c format:
+    # [#68a12b 12MiB/85MiB(14%) CN:16 DL:8.5MiB ETA:8s]
+    match_aria = re.search(r'\[#\w+\s+([^\s/]+)/([^\s(]+)\((\d+)%\).*?DL:([^\s]+)(?:\s+ETA:([^\s\]]+))?', line_str)
+    if match_aria:
+        downloaded = match_aria.group(1)
+        total_size = match_aria.group(2)
+        pct = float(match_aria.group(3))
+        raw_speed = match_aria.group(4)
+        speed = f"{raw_speed}/s" if not raw_speed.endswith('/s') else raw_speed
+        eta = match_aria.group(5) or "0s"
+        return {
+            'percent': pct,
+            'downloaded': downloaded,
+            'total_size': total_size,
+            'speed': speed,
+            'eta': eta
+        }
+
+    # 2. standard yt-dlp format:
+    # [download]  45.2% of  120.50MiB at   15.20MiB/s ETA 00:04
+    match_yt = re.search(r'\[download\]\s+([\d\.]+)%\s+of\s+~?([^\s]+)\s+at\s+([^\s]+)\s+ETA\s+([^\s]+)', line_str)
+    if match_yt:
+        return {
+            'percent': float(match_yt.group(1)),
+            'total_size': match_yt.group(2),
+            'downloaded': None,
+            'speed': match_yt.group(3),
+            'eta': match_yt.group(4)
+        }
+
+    # 3. yt-dlp fragment format:
+    match_frag = re.search(r'\[download\]\s+([\d\.]+)%\s+of\s+~?([^\s]+)(?:\s+at\s+([^\s]+))?.*?(?:frag\s+(\d+)/(\d+))?', line_str)
+    if match_frag and match_frag.group(1):
+        pct = float(match_frag.group(1))
+        total_size = match_frag.group(2)
+        speed = match_frag.group(3) or "Downloading..."
+        curr_f = match_frag.group(4)
+        tot_f = match_frag.group(5)
+        eta = f"{int(tot_f) - int(curr_f)} frags" if (curr_f and tot_f) else "Calculating..."
+        return {
+            'percent': pct,
+            'total_size': total_size,
+            'downloaded': None,
+            'speed': speed,
+            'eta': eta
+        }
+
+    return None
+
+
+def make_progress_bar(pct: float, bar_len: int = 10) -> str:
+    filled = int(round(bar_len * pct / 100))
+    filled = max(0, min(bar_len, filled))
+    return "▰" * filled + "▱" * (bar_len - filled)
+
+
+async def run(cmd, prog=None, title="Video", index=1, total_links=1, batch_name="", quality="720"):
+    # If prog is given and command is yt-dlp, add --newline to ensure line-buffering
+    if "yt-dlp" in cmd and "--newline" not in cmd:
+        cmd = cmd.replace("yt-dlp ", "yt-dlp --newline ")
+
     proc = await asyncio.create_subprocess_shell(
         cmd,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE)
+        stderr=asyncio.subprocess.STDOUT
+    )
 
-    stdout, stderr = await proc.communicate()
+    last_update_time = 0
+    last_pct = -1
 
-    print(f'[{cmd!r} exited with {proc.returncode}]')
-    if proc.returncode == 1:
+    while True:
+        line = await proc.stdout.readline()
+        if not line:
+            break
+        line_str = line.decode('utf-8', errors='ignore').strip()
+        if not line_str:
+            continue
+
+        if prog:
+            info = parse_progress_line(line_str)
+            if info:
+                now = time.time()
+                pct = info['percent']
+                if (now - last_update_time >= 3.5) and (abs(pct - last_pct) >= 1.0 or pct >= 99):
+                    last_update_time = now
+                    last_pct = pct
+
+                    bar = make_progress_bar(pct, 10)
+                    downloaded = info.get('downloaded')
+                    total_size = info.get('total_size')
+                    if downloaded and total_size:
+                        size_str = f"{downloaded} / {total_size}"
+                    elif total_size:
+                        size_str = f"~{total_size}"
+                    else:
+                        size_str = "Calculating..."
+
+                    speed = info.get('speed', 'Calculating...')
+                    eta = info.get('eta', 'Calculating...')
+                    clean_title = (title or "Video")[:48]
+
+                    text = (
+                        f"╭━━━❰ ⚡ <b>𝐃𝐎𝐖𝐍𝐋𝐎𝐀𝐃𝐈𝐍𝐆 𝐕𝐈𝐃𝐄𝐎</b> ⚡ ❱━━━➣\n"
+                        f"┣⪼ 🔢 <b>Index :</b> <code>[{str(index).zfill(3)} / {total_links}]</code>\n"
+                        f"┣⪼ 🎬 <b>Title :</b> <code>{clean_title}</code>\n"
+                        f"┣⪼ 📚 <b>Batch :</b> <i>{batch_name}</i>\n"
+                        f"┣⪼ 🍁 <b>Quality :</b> <code>{quality}</code>\n"
+                        f"┣━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"┣⪼ 📊 <b>Progress :</b> <code>[{bar}]</code> <b>{pct:.1f}%</b>\n"
+                        f"┣⪼ 📦 <b>Size :</b> <code>{size_str}</code>\n"
+                        f"┣⪼ 🚀 <b>Speed :</b> <code>{speed}</code>\n"
+                        f"┣⪼ ⏰ <b>ETA :</b> <code>{eta}</code>\n"
+                        f"╰━━⌈ 🦋 <code>{CREDIT}</code> 🦋 ⌋━━➣"
+                    )
+                    try:
+                        await prog.edit(text, disable_web_page_preview=True)
+                    except FloodWait as fw:
+                        await asyncio.sleep(fw.x)
+                    except Exception:
+                        pass
+
+    await proc.wait()
+    if proc.returncode != 0:
+        print(f'[{cmd!r} exited with {proc.returncode}]')
         return False
-    if stdout:
-        return f'[stdout]\n{stdout.decode()}'
-    if stderr:
-        return f'[stderr]\n{stderr.decode()}'
+    return True
 
 
 def old_download(url, file_name, chunk_size = 1024 * 10 * 10):
@@ -663,9 +814,9 @@ async def fast_download(url, name):
 
 
 # ============================================================
-#  🔥 UPDATED: download_video with PW video detection
+#  🔥 UPDATED: download_video with PW video detection & live progress
 # ============================================================
-async def download_video(url, cmd, name):
+async def download_video(url, cmd, name, prog=None, title=None, index=1, total_links=1, batch_name="", quality="720"):
     retry_count = 0
     max_retries = 3
     
@@ -693,16 +844,16 @@ async def download_video(url, cmd, name):
     # ============================================================
     while retry_count < max_retries:
         try:
-            # Modified command for better compatibility
+            # Modified command for better compatibility and max speed
             if "m3u8" in url or "mpd" in url:
-                download_cmd = f'{cmd} -R 25 --fragment-retries 25 --no-check-certificate --concurrent-fragments 10 --allow-unplayable-format --http-chunk-size 10M'
+                download_cmd = f'{cmd} --newline -R 25 --fragment-retries 25 --no-check-certificate --concurrent-fragments 16 --allow-unplayable-format --http-chunk-size 10M --buffer-size 16M'
             else:
-                download_cmd = f'{cmd} -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 5 --summary-interval=0 --console-log-level=error"'
+                download_cmd = f'{cmd} --newline -R 25 --fragment-retries 25 --external-downloader aria2c --downloader-args "aria2c: -x 16 -s 16 -k 1M -j 16 --min-split-size=1M --max-connection-per-server=16 --summary-interval=1 --console-log-level=notice"'
             
             print(f"⬇️ Running: {download_cmd}")
             logging.info(download_cmd)
 
-            k = await run(download_cmd)
+            k = await run(download_cmd, prog=prog, title=title or name, index=index, total_links=total_links, batch_name=batch_name, quality=quality)
 
             if k is not False:
                 break
@@ -739,6 +890,48 @@ async def download_video(url, cmd, name):
     except Exception as exc:
         logging.error(f"Error checking file: {exc}")
         return f"{name}.mp4"
+
+
+def decrypt_file(file_path, key):  
+    if not os.path.exists(file_path): 
+        return False  
+    try:
+        with open(file_path, "r+b") as f:  
+            num_bytes = min(28, os.path.getsize(file_path))  
+            with mmap.mmap(f.fileno(), length=num_bytes, access=mmap.ACCESS_WRITE) as mmapped_file:  
+                for i in range(num_bytes):  
+                    mmapped_file[i] ^= ord(key[i]) if i < len(key) else i 
+        return True
+    except Exception as e:
+        print(f"Error decrypting file {file_path}: {e}")
+        return False
+
+
+async def download_and_decrypt_video(url, cmd, name, key, prog=None, title=None, index=1, total_links=1, batch_name="", quality="720"):  
+    video_path = await download_video(url, cmd, name, prog=prog, title=title, index=index, total_links=total_links, batch_name=batch_name, quality=quality)  
+    if video_path:
+        if prog:
+            try:
+                await prog.edit(
+                    f"╭━━━❰ 🔓 <b>𝐃𝐄𝐂𝐑𝐘𝐏𝐓𝐈𝐍𝐆 𝐀𝐏𝐏𝐗 𝐕𝐈𝐃𝐄𝐎</b> 🔓 ❱━━━➣\n"
+                    f"┣⪼ 🔢 <b>Index :</b> <code>[{str(index).zfill(3)} / {total_links}]</code>\n"
+                    f"┣⪼ 🎬 <b>Title :</b> <code>{(title or name)[:48]}</code>\n"
+                    f"┣⪼ 📚 <b>Batch :</b> <i>{batch_name}</i>\n"
+                    f"┣━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"┣⪼ ⚙️ <b>Status :</b> <code>Applying decryption key...</code>\n"
+                    f"╰━━⌈ 🦋 <code>{CREDIT}</code> 🦋 ⌋━━➣",
+                    disable_web_page_preview=True
+                )
+            except Exception:
+                pass
+        decrypted = decrypt_file(video_path, key)  
+        if decrypted:  
+            print(f"File {video_path} decrypted successfully.")  
+            return video_path  
+        else:  
+            print(f"Failed to decrypt {video_path}.")  
+            return None  
+    return None
 
 
 async def send_vid(bot: Client, m: Message, cc, filename, thumb, name, prog, channel_id, watermark="𝐈𝐓'𝐬𝐆𝐎𝐋𝐔", topic_thread_id: int = None):
