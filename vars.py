@@ -4,7 +4,7 @@ from os import environ
 # API Configuration
 API_ID = int(os.environ.get("API_ID", "37748306"))
 API_HASH = os.environ.get("API_HASH", "745b95ee77934f04e84594d23b13c0ef")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8880313683:AAH3B1w0rLsjny3y6sI6ENu2Wp9rBpJhUOI")
 
 CREDIT = os.environ.get("CREDIT", "ROHIT")
 # MongoDB Configuration
@@ -28,6 +28,13 @@ PORT = int(os.environ.get("PORT", 8000))
 
 # RareStudy VPN / Proxy Configuration (HTTP/HTTPS/SOCKS5)
 RARESTUDY_PROXY = os.environ.get("RARESTUDY_PROXY", "").strip()
+
+# PWThor Configuration
+PWTHOR_AUTH_TOKEN = os.environ.get(
+    "PWTHOR_AUTH_TOKEN",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJtb2JpbGUiOiI2MDc0OTA0OTg2ODAiLCJuYW1lIjoiUFdUaG9yIFVzZXIgNzMyODk5M2UiLCJyYW5kb21JZCI6IjczMjg5OTNlLTk1NTctNGExZS05NzIyLTMyNWUxNTEzMjEzMyIsImF1dGhUeXBlIjoiZGlyZWN0X2xvZ2luIiwiZGlyZWN0TG9naW4iOnRydWUsImlhdCI6MTc4NTg5NTI0OSwiZXhwIjoxNzkzNjcxMjQ5fQ.HaE0LWC3csez4jYlQSTh286_5HRqNQQI28Ipgdxw6iU"
+)
+PWTHOR_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pwthor_config.json")
 
 # Message Formats
 AUTH_MESSAGES = {
