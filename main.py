@@ -80,6 +80,13 @@ from db import db
 #  🆕 MODULE IMPORTS FOR COURSE HANDLING
 # ============================================================
 from modules.course_handler import process_course_and_upload
+from modules.pwthor_handler import (
+    process_pwthor_and_upload,
+    is_pwthor_json,
+    parse_pwthor_course,
+    get_pwthor_token,
+    set_pwthor_token
+)
 from modules.rarestudy_handler import (
     process_rarestudy_and_upload,
     is_rarestudy_json,
@@ -309,6 +316,7 @@ async def start(bot: Client, m: Message):
                 "**✨ Bot is active in this channel**\n\n"
                 "**Available Commands:**\n"
                 "• /drm - Download DRM videos\n"
+                "• /pwthor - Upload PWThor (.json) courses (100x Turbo)\n"
                 "• /rarestudy - Upload RareStudy (.json) courses\n"
                 "• /plan - View channel subscription\n\n"
                 "Send these commands in the channel to use them."
@@ -339,6 +347,9 @@ async def start(bot: Client, m: Message):
                 
             commands_list = (
                 "**>  /drm - ꜱᴛᴀʀᴛ ᴜᴘʟᴏᴀᴅɪɴɢ ᴄᴘ/ᴄᴡ ᴄᴏᴜʀꜱᴇꜱ**\n"
+                "**>  /pwthor - ᴜᴘʟᴏᴀᴅ PWThor (.ᴊꜱᴏɴ) ᴄᴏᴜʀꜱᴇꜱ (Turbo DRM)**\n"
+                "**>  /setpwtoken - ᴜᴘᴅᴀᴛᴇ PWThor Aᴜᴛʜ Tᴏᴋᴇɴ**\n"
+                "**>  /getpwtoken - ᴠɪᴇᴡ PWThor Tᴏᴋᴇɴ Sᴛᴀᴛᴜꜱ**\n"
                 "**>  /rarestudy - ᴜᴘʟᴏᴀᴅ RᴀʀᴇSᴛᴜᴅʏ (.ᴊꜱᴏɴ) ᴄᴏᴜʀꜱᴇꜱ**\n"
                 "**>  /setheaders - ᴜᴘᴅᴀᴛᴇ RᴀʀᴇSᴛᴜᴅʏ Hᴇᴀᴅᴇʀꜱ/Cᴏᴏᴋɪᴇꜱ**\n"
                 "**>  /getheaders - ᴠɪᴇᴡ RᴀʀᴇSᴛᴜᴅʏ Hᴇᴀᴅᴇʀꜱ**\n"
@@ -563,6 +574,257 @@ async def rarestudy_command(client: Client, message: Message):
 
     json_path = await json_msg.download()
     await handle_rarestudy_flow(client, message, json_path)
+
+
+# ============================================================
+#  🆕 PWTHOR HANDLER FLOW & COMMAND (/pwthor, /pw)
+# ============================================================
+async def handle_pwthor_flow(client: Client, message: Message, json_path: str, c_data: dict = None):
+    """Interactive wizard for PWThor course upload."""
+    if c_data is None:
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                c_data = json.load(f)
+        except Exception as e:
+            await message.reply_text(f"❌ **Error reading JSON:** {e}")
+            if os.path.exists(json_path):
+                os.remove(json_path)
+            return
+
+    batch_id, batch_name, video_items, note_items = parse_pwthor_course(c_data)
+    total_videos = len(video_items)
+    total_notes = len(note_items)
+    total_items = total_videos + total_notes
+
+    if total_items == 0:
+        await message.reply_text("❌ **No lectures or notes found in this PWThor JSON!**")
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        return
+
+    info_card = (
+        "╔══════════════════════════════════╗\n"
+        "   ⚡ **PWTHOR JSON DETECTED!** ⚡\n"
+        "╚══════════════════════════════════╝\n\n"
+        f"📚 **Batch:** `{batch_name}`\n"
+        f"📽️ **Total Videos:** `{total_videos}`\n"
+        f"📄 **Total PDFs:** `{total_notes}`\n"
+        f"📦 **Total Items:** `{total_items}`\n"
+        f"🌐 **Engine:** `PWThor Live + N_m3u8DL-RE (100x Turbo)`\n\n"
+        "📺 **Step 2:** Select **Video Quality** below:"
+    )
+
+    quality_kb = ReplyKeyboardMarkup(
+        [
+            ["720p HD", "480p SD"],
+            ["360p Low", "240p Lowest"]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    q_msg = await message.reply_text(info_card, reply_markup=quality_kb)
+
+    try:
+        q_resp = await client.listen(message.chat.id, timeout=60)
+        raw_q = (q_resp.text or "").strip().lower()
+        if "480" in raw_q:
+            quality = "480"
+        elif "360" in raw_q:
+            quality = "360"
+        elif "240" in raw_q:
+            quality = "240"
+        else:
+            quality = "720"
+    except asyncio.TimeoutError:
+        quality = "720"
+        await message.reply_text("⏳ Timeout! Defaulting to 720p HD.")
+    finally:
+        try:
+            await q_msg.delete()
+        except Exception:
+            pass
+
+    # Step 3: Content Selection (All / Only Videos / Only PDFs)
+    content_kb = ReplyKeyboardMarkup(
+        [
+            ["📦 Upload All (Videos + PDFs)"],
+            ["🎥 Only Videos", "📄 Only PDFs"]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    c_prompt = (
+        "📁 **Step 3: Select What to Upload:**\n\n"
+        f"• Videos: `{total_videos}` | PDFs: `{total_notes}`\n"
+        "Choose an option below:"
+    )
+    c_msg = await message.reply_text(c_prompt, reply_markup=content_kb)
+    try:
+        c_resp = await client.listen(message.chat.id, timeout=45)
+        raw_c = (c_resp.text or "").strip().lower()
+        if "only videos" in raw_c or ("videos" in raw_c and "all" not in raw_c):
+            content_filter = "videos_only"
+        elif "only pdfs" in raw_c or ("pdfs" in raw_c and "all" not in raw_c):
+            content_filter = "pdfs_only"
+        else:
+            content_filter = "all"
+    except asyncio.TimeoutError:
+        content_filter = "all"
+        await message.reply_text("⏳ Timeout! Uploading All content.")
+    finally:
+        try:
+            await c_msg.delete()
+        except Exception:
+            pass
+
+    # Step 4: Target Channel Selection
+    channel_kb = ReplyKeyboardMarkup(
+        [["📍 Upload to Current Chat"]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    chan_prompt = (
+        "📢 **Step 4: Enter Target Channel / Group ID:**\n\n"
+        "• Tap **Upload to Current Chat**\n"
+        "• OR send Channel ID (e.g. `-1001234567890`)"
+    )
+    chan_msg = await message.reply_text(chan_prompt, reply_markup=channel_kb)
+    try:
+        channel_msg = await client.listen(message.chat.id, timeout=45)
+        raw_ch = channel_msg.text.strip() if channel_msg.text else ""
+        if "Current Chat" in raw_ch:
+            channel_id = message.chat.id
+        else:
+            channel_id = int(raw_ch)
+    except asyncio.TimeoutError:
+        channel_id = message.chat.id
+        await message.reply_text(f"⏳ Timeout! Uploading to current chat: `{channel_id}`")
+    except ValueError:
+        channel_id = message.chat.id
+        await message.reply_text(f"❌ Invalid format! Uploading to current chat: `{channel_id}`")
+    finally:
+        try:
+            await chan_msg.delete()
+        except Exception:
+            pass
+
+    await message.reply_text(
+        "🚀 **Setup Complete! Initializing PWThor DRM Engine...**",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+    await process_pwthor_and_upload(
+        client=client,
+        message=message,
+        json_path=json_path,
+        quality=quality,
+        channel_id=channel_id,
+        content_filter=content_filter
+    )
+
+
+@bot.on_message(filters.command(["pwthor", "pw"]) & auth_filter)
+async def pwthor_command(client: Client, message: Message):
+    """Starts the process to upload a PWThor course from JSON file."""
+    welcome_card = (
+        "╔══════════════════════════════════╗\n"
+        "   ⚡ **PWTHOR AUTO-UPLOADER** ⚡\n"
+        "╚══════════════════════════════════╝\n\n"
+        "📥 **Step 1:** Please upload your PWThor **Course .json file** now:\n"
+        "*(Jaise: `MISSION JRF Computer 2027.json`)*"
+    )
+    prompt = await message.reply_text(welcome_card)
+    try:
+        json_msg = await client.listen(message.chat.id, timeout=90)
+    except asyncio.TimeoutError:
+        await message.reply_text("❌ **Timeout!** Please run /pwthor again.")
+        return
+    finally:
+        try:
+            await prompt.delete()
+        except Exception:
+            pass
+
+    if not json_msg.document or not (json_msg.document.file_name or "").endswith(".json"):
+        await message.reply_text("❌ **Invalid file!** Please upload a valid `.json` document.")
+        return
+
+    json_path = await json_msg.download()
+    await handle_pwthor_flow(client, message, json_path)
+
+
+@bot.on_message(filters.document & filters.private & auth_filter)
+async def handle_direct_json_document(client: Client, message: Message):
+    """Auto-detects JSON files sent directly to the bot without needing to type /pwthor first."""
+    doc = message.document
+    if not doc or not (doc.file_name or "").lower().endswith(".json"):
+        return
+
+    json_path = await message.download()
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if is_pwthor_json(data):
+            await handle_pwthor_flow(client, message, json_path, data)
+            return
+        elif is_rarestudy_json(data):
+            await handle_rarestudy_flow(client, message, json_path, data)
+            return
+        else:
+            await handle_pwthor_flow(client, message, json_path, data)
+            return
+    except Exception as e:
+        if os.path.exists(json_path):
+            try: os.remove(json_path)
+            except Exception: pass
+        await message.reply_text(f"❌ **Error reading uploaded JSON:** `{e}`")
+
+
+@bot.on_message(filters.command(["setpwtoken", "pwtoken"]) & auth_filter)
+async def set_pw_token_command(client: Client, message: Message):
+    """Allows updating PWThor Auth JWT Token via bot."""
+    args = message.text.split(None, 1)
+    if len(args) < 2:
+        curr_token = get_pwthor_token()
+        masked = curr_token[:16] + "..." + curr_token[-16:] if len(curr_token) > 32 else curr_token
+        await message.reply_text(
+            "⚙️ **PWThor Token Manager**\n\n"
+            f"🔑 **Current Token:** `{masked}`\n\n"
+            "💡 **To update, use format:**\n"
+            "`/setpwtoken <your_pwthor_auth_token>`"
+        )
+        return
+
+    new_token = args[1].strip()
+    if set_pwthor_token(new_token):
+        masked = new_token[:16] + "..." + new_token[-16:] if len(new_token) > 32 else new_token
+        await message.reply_text(
+            "✅ **PWThor Auth Token Updated Successfully!**\n\n"
+            f"🔑 **New Token:** `{masked}`\n"
+            "Ab sabhi PWThor courses is naye token se download honge."
+        )
+    else:
+        await message.reply_text("❌ Failed to save token. Please check logs.")
+
+
+@bot.on_message(filters.command(["getpwtoken", "mypwtoken"]) & auth_filter)
+async def get_pw_token_command(client: Client, message: Message):
+    """Displays active PWThor Auth Token status."""
+    token = get_pwthor_token()
+    if token:
+        masked = token[:16] + "..." + token[-16:] if len(token) > 32 else token
+        await message.reply_text(
+            "🛡️ **PWThor Auth Token Status**\n\n"
+            "✅ **Status:** Active\n"
+            f"🔑 **Token:** `{masked}`\n\n"
+            "💡 *Token badalne ke liye type karein:* `/setpwtoken <new_token>`"
+        )
+    else:
+        await message.reply_text(
+            "⚠️ **No PWThor Token Found!**\n\n"
+            "Set karein via: `/setpwtoken <token>`"
+        )
 
 
 # ============================================================
@@ -816,6 +1078,11 @@ async def add_course_command(client: Client, message: Message):
             # Auto-detect RareStudy / TestUK format
             if is_rarestudy_json(c_data):
                 await handle_rarestudy_flow(client, message, json_path, c_data)
+                return
+
+            # Auto-detect PWThor format
+            if is_pwthor_json(c_data):
+                await handle_pwthor_flow(client, message, json_path, c_data)
                 return
 
             detected_batch = (
@@ -2006,6 +2273,9 @@ async def user_commands_callback(client, callback_query: CallbackQuery):
     user_cmds_text = (
         "**👤 यूज़र कमांड्स (सभी को उपलब्ध)**\n\n"
         "• `/plan` – अपनी सब्सक्रिप्शन डिटेल देखें\n"
+        "• `/pwthor` – PWThor कोर्स (.json) अपलोड करें (100x Turbo)\n"
+        "• `/setpwtoken` – PWThor Auth JWT Token अपडेट करें\n"
+        "• `/getpwtoken` – PWThor टोकन स्टेटस देखें\n"
         "• `/rarestudy` – RareStudy कोर्स (.json) अपलोड करें\n"
         "• `/setheaders` – RareStudy कुकीज़/हेडर्स अपडेट करें\n"
         "• `/setproxy` – RareStudy VPN/Proxy (WARP) सेट करें\n"
