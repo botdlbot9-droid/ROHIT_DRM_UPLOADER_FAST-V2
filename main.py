@@ -23,11 +23,20 @@ import aiohttp
 import aiofiles
 import requests
 import asyncio
+try:
+    loop = asyncio.get_event_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
 import ffmpeg
 import m3u8
 import cloudscraper
 import yt_dlp
-import tgcrypto
+try:
+    import tgcrypto
+except ImportError:
+    pass
 from logs import logging
 from bs4 import BeautifulSoup
 from pytube import YouTube
@@ -1660,6 +1669,23 @@ async def txt_handler(bot: Client, m: Message):
             keys_string = ""
             appxkey = ""
             
+            # ============================================================
+            #  🔥 GENERIC DRM KEY PARSER VIA TXT (FORMAT: mpd_url*key1*key2)
+            # ============================================================
+            if "*" in url and ".mpd" in url and "classx.co.in" not in url:
+                parts = url.split("*")
+                potential_url = parts[0]
+                extracted_keys = []
+                for p in parts[1:]:
+                    if ":" in p and len(p.split(":")[0]) == 32:
+                        extracted_keys.append(f"--key {p.strip()}")
+                    elif len(p.strip()) == 32:
+                        extracted_keys.append(f"--key {p.strip()}")
+                if extracted_keys:
+                    url = potential_url
+                    keys_string = " ".join(extracted_keys)
+                    print(f"🔑 Generic DRM Keys Extracted: {keys_string}")
+
             if "visionias" in url:
                 async with ClientSession() as session:
                     async with session.get(url, headers={'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9', 'Accept-Language': 'en-US,en;q=0.9', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'Pragma': 'no-cache', 'Referer': 'http://www.visionias.in/', 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'cross-site', 'Upgrade-Insecure-Requests': '1', 'User-Agent': 'Mozilla/5.0 (Linux; Android 12; RMX2121) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Mobile Safari/537.36', 'sec-ch-ua': '"Chromium";v="107", "Not=A?Brand";v="24"', 'sec-ch-ua-mobile': '?1', 'sec-ch-ua-platform': '"Android"',}) as resp:
